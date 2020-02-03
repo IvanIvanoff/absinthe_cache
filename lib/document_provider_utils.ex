@@ -1,4 +1,4 @@
-defmodule Graphql.DocumentProvider.Utils do
+defmodule AbsintheCache.DocumentProvider.Utils do
   @compile :inline_list_funcs
   @compile {:inline, cache_key_from_params: 2}
 
@@ -34,7 +34,7 @@ defmodule Graphql.DocumentProvider.Utils do
       end)
       |> Map.new()
 
-    Graphql.Cache.cache_key({query, permissions}, variables,
+    AbsintheCache.cache_key({query, permissions}, variables,
       ttl: 120,
       max_ttl_offset: 90
     )

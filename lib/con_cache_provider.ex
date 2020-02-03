@@ -1,5 +1,6 @@
-defmodule Graphql.ConCacheProvider do
-  @behaviour Cache.Behaviour
+defmodule AbsintheCache.ConCacheProvider do
+  # TODO: Check if con_cache is available
+  @behaviour AbsintheCache.Behaviour
 
   @compile :inline_list_funcs
   @compile {:inline, get: 2, store: 3, get_or_store: 4, cache_item: 3}

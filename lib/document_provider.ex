@@ -1,4 +1,4 @@
-defmodule Graphql.DocumentProvider do
+defmodule AbsintheCache.DocumentProvider do
   @moduledoc ~s"""
   Custom Absinthe DocumentProvider for more effective caching.
 
@@ -21,8 +21,6 @@ defmodule Graphql.DocumentProvider do
   In the end there's a `before_send` hook that adds the result into the cache.
   """
   @behaviour Absinthe.Plug.DocumentProvider
-
-  alias Graphql.Cache
 
   @doc false
   @impl true
@@ -60,8 +58,6 @@ defmodule Graphql.Phase.Document.Execution.CacheDocument do
   """
   use Absinthe.Phase
 
-  alias Graphql.Cache
-
   @compile inline: [add_cache_key_to_blueprint: 2]
 
   @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
@@ -69,7 +65,7 @@ defmodule Graphql.Phase.Document.Execution.CacheDocument do
     permissions = bp_root.execution.context.permissions
 
     cache_key =
-      Graphql.Cache.cache_key(
+      AbsintheCache.cache_key(
         {"bp_root", permissions},
         santize_blueprint(bp_root),
         ttl: 120,
@@ -78,7 +74,7 @@ defmodule Graphql.Phase.Document.Execution.CacheDocument do
 
     bp_root = add_cache_key_to_blueprint(bp_root, cache_key)
 
-    case Cache.get(cache_key) do
+    case AbsintheCache.get(cache_key) do
       nil ->
         {:ok, bp_root}
 
@@ -87,7 +83,7 @@ defmodule Graphql.Phase.Document.Execution.CacheDocument do
         # This can lead to infinite storing the same value
         Process.put(:do_not_cache_query, true)
 
-        {:jump, %{bp_root | result: result}, Graphql.Phase.Document.Execution.Idempotent}
+        {:jump, %{bp_root | result: result}, AbsintheCache.Phase.Document.Execution.Idempotent}
     end
   end
 
@@ -131,7 +127,7 @@ defmodule Graphql.Phase.Document.Execution.CacheDocument do
   defp santize_blueprint(data), do: data
 end
 
-defmodule Graphql.Phase.Document.Execution.Idempotent do
+defmodule AbsintheCache.Phase.Document.Execution.Idempotent do
   @moduledoc ~s"""
   A phase that does nothing and is inserted after the Absinthe's Result phase.
   `CacheDocument` phase jumps to this `Idempotent` phase if it finds the needed
