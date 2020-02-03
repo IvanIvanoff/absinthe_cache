@@ -8,6 +8,8 @@ defmodule AbsintheCache do
 
   @ttl 300
   @max_ttl_offset 120
+
+  # TODO: Configurable
   @cache_name :graphql_cache
 
   @compile :inline_list_funcs
