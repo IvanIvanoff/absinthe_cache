@@ -27,8 +27,9 @@ defmodule AbsintheCache.AbsintheBeforeSend do
   @compile :inline_list_funcs
   @compile inline: [cache_result: 2, queries_in_request: 1, has_graphql_errors?: 1]
 
-  # TODO: Make configurable
-  @cached_queries []
+  # TODO: Make this module `use`able and let the user
+  # provide a function `cached_queries`, thus avoiding using configs
+  @cached_queries Application.get_env(:absinthe_cache, :cached_queries, [])
 
   def before_send(conn, %Absinthe.Blueprint{} = blueprint) do
     # Do not cache in case of:
