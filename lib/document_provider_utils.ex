@@ -3,11 +3,14 @@ defmodule AbsintheCache.DocumentProvider.Utils do
   @compile {:inline, cache_key_from_params: 2}
 
   @doc ~s"""
-  Extract the query and variables from the params map and genenrate a cache key from them
+  Extract the query and variables from the params map and genenrate
+  a cache key using them.
+
   The query is fetched as is.
-  The variables that are valid datetime types (have the `from` or `to` name and valid value)
-  are converted to Elixir DateTime type before being used. This is done because
-  the datetimes are rounded so all datetimes in a N minute buckets have the same cache key
+  The variables that are valid datetime types (have the `from` or `to` name
+  and valid value) are converted to Elixir DateTime type prior to being used.
+  This is done because the datetimes are rounded so all datetimes in a N minute
+  buckets have the same cache key.
 
   The other param types are not cast as they would be used the same way in both
   places where the cache key is calculated.

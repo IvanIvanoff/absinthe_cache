@@ -2,23 +2,23 @@ defmodule AbsintheCache.DocumentProvider do
   @moduledoc ~s"""
   Custom Absinthe DocumentProvider for more effective caching.
 
-  Absinthe phases have one main difference compared to plugs - all phases must run
-  and cannot be halted. But phases can be jumped over by returning
+  Absinthe phases have one main difference in comparison to plugs - all phases
+  must run and cannot be halted. But phases can be jumped over by returning
   `{:jump, result, destination_phase}`
 
   This module makes use of 2 new phases - a `CacheDocument` phase and `Idempotent`
   phase.
 
-  If the value is present in the cache it is put in the blueprint and the execution
-  jumps to the Idempotent phase, effectively skipping the Absinthe's Resolution
-  and Result phases. Result is the last phase in the pipeline so the Idempotent
+  If the value is present in the cache, it is put in the blueprint and the execution
+  jumps to the `Idempotent` phase, effectively skipping the Absinthe's `Resolution`
+  and Result phases. Result is the last phase in the pipeline, thus the Idempotent
   phase is inserted after it.
 
-  If the value is not present in the cache, the Absinthe's default Resolution and
-  Result phases are being executed and the new DocumentCache and Idempotent phases
-  are doing nothing.
+  If the value is not present in the cache, the Absinthe's default `Resolution` and
+  `Result` phases are being executed and the new `DocumentCache` and `Idempotent`
+  phases are no-op.
 
-  In the end there's a `before_send` hook that adds the result into the cache.
+  Finally, there's a `before_send` hook that adds the result into the cache.
   """
   @behaviour Absinthe.Plug.DocumentProvider
 
@@ -45,15 +45,16 @@ end
 defmodule Graphql.Phase.Document.Execution.CacheDocument do
   @moduledoc ~s"""
   Custom phase for obtaining the result from cache.
-  In case the value is not present in the cache, the default Resolution and Result
-  phases are ran. Otherwise the custom Resolution phase is ran and Result is jumped
-  over.
+  In case the value is not present in the cache, the default `Resolution` and
+  `Result` phases are run. Otherwise the custom `Resolution` phase is run and
+  `Result` is jumped over.
 
-  When calculating the cache key only some of the fields in the whole blueprint are
-  taken into account. They are defined in the module attribute @cache_fields
-  The only values that are converted to something else during constructing
+  When calculating the cache key only some of the fields of the whole blueprint
+  are used. They are defined in the module attribute @cache_fields. The only
+  values that are converted to something else in the process of construction
   of the cache key are:
-  - DateTime - It is rounded by TTL so all datetiems in a range yield the same cache key
+  - DateTime - It is rounded by TTL so all datetiems in a range yield the same
+   cache key
   - Struct - All structs are converted to plain maps
   """
   use Absinthe.Phase
@@ -97,10 +98,10 @@ defmodule Graphql.Phase.Document.Execution.CacheDocument do
     }
   end
 
-  # Leave only the fields that are needed to generate the cache key
-  # This let's us cache with values that are interpolated into the query string itself
-  # The datetimes are rounded so all datetimes in a bucket generate the same
-  # cache key
+  # Leave only the fields that are needed to generate the cache key.
+  # This allows us to cache with values that are interpolated into the query
+  # string itself. The datetimes are rounded so all datetimes in a bucket
+  # generate the same cache key.
   defp santize_blueprint(%DateTime{} = dt), do: dt
   defp santize_blueprint({:argument_data, _} = tuple), do: tuple
   defp santize_blueprint({a, b}), do: {a, santize_blueprint(b)}
@@ -129,9 +130,9 @@ end
 
 defmodule AbsintheCache.Phase.Document.Execution.Idempotent do
   @moduledoc ~s"""
-  A phase that does nothing and is inserted after the Absinthe's Result phase.
-  `CacheDocument` phase jumps to this `Idempotent` phase if it finds the needed
-  value in the cache so the Absinthe's Resolution and Result phases are skipped.
+  A no-op phase inserted after the Absinthe's `Result` phase.
+  If the needed value is found in the cache, `CacheDocument` phase jumps to
+  `Idempotent` one so the Absinthe's `Resolution` and `Result` phases are skipped.
   """
   use Absinthe.Phase
   @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
