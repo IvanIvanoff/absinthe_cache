@@ -1,8 +1,8 @@
 defmodule AbsintheCache do
   @moduledoc ~s"""
   Provides the macro `cache_resolve` that replaces the Absinthe's `resolve` and
-  caches the result of the resolver for a some time instead of precalculating itt
-  each time.
+  caches the result of the resolver for some time instead of calculating it
+  every time.
   """
   require Logger
 
@@ -27,21 +27,21 @@ defmodule AbsintheCache do
             convert_values: 2}
 
   alias __MODULE__, as: CacheMod
-  # TODO: Make
+  # TODO: Make configurable
   alias AbsintheCache.ConCacheProvider, as: CacheProvider
 
   @doc ~s"""
   Macro that's used instead of Absinthe's `resolve`. This resolver can perform
   the following operations:
-  1. Get the value from a cache if it is persisted. The resolver function is not
-  evaluated at all in this case
+  1. Get the stored value if there is one. The resolver function is not
+  evaluated at all in this case.
   2. Evaluate the resolver function and store the value in the cache if it is
-  not present there
+  not present there.
   3. Handle the `Absinthe.Middlewar.Async` and `Absinthe.Middleware.Dataloader`
-  middlewares. In order to handle them, the functions that executes the actual
+  middlewares. In order to handle them, the function that executes the actual
   evaluation is wrapped in a function that handles the cache interactions
 
-  There are 2 options for the passed function:
+  There are two options for the passed function:
   1. It can be a captured named function because its name is extracted
   and used in the cache key.
   2. If the function is anonymous or a different name should be used, a second

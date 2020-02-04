@@ -130,9 +130,9 @@ end
 
 defmodule AbsintheCache.Phase.Document.Execution.Idempotent do
   @moduledoc ~s"""
-  A phase that does nothing and is inserted after the Absinthe's Result phase.
-  `CacheDocument` phase jumps to this `Idempotent` phase if it finds the needed
-  value in the cache so the Absinthe's Resolution and Result phases are skipped.
+  A no-op phase inserted after the Absinthe's `Result` phase.
+  If the needed value is found in the cache, `CacheDocument` phase jumps to
+  `Idempotent` one so the Absinthe's `Resolution` and `Result` phases are skipped.
   """
   use Absinthe.Phase
   @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()

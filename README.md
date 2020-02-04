@@ -32,7 +32,17 @@ The cache implementation has been used at [Santiment](https://santiment.net/) si
 
 ## Examples
 
-First you need to start the cache backend in your supervisor:
+Full repo example can be found [here](https://github.com/IvanIvanoff/absinthe_cache_example)
+
+---
+
+### Example 1
+
+**Problem**: There is a function `MetricResolver.get_metadata/3` that returns the metadata for a given metric. This function takes a lot of time to compute as it fetches data from three different databases and from elasticsearch. The solution to this is to cache it for 5 minutes.
+
+In order to cache the resolver the following steps must be done:
+
+First, the cache backend needs to be started in the supervision tree:
 
 ```elixir
 # TODO: Abstract & improve
@@ -48,7 +58,7 @@ Supervisor.child_spec(
 )
 ```
 
-It's important that the name of the cache is `:graphql_cache` as this is currently hardcoded in the implementation (will be improved)
+This is where the cached data is persisted. It's important that the name of the cache is `:graphql_cache` as this is currently hardcoded in the implementation (will be improved)
 
 Then the new resolve macros need to be imported.
 
@@ -56,7 +66,7 @@ Then the new resolve macros need to be imported.
 import AbsintheCache, only: [cache_resolve: 1, cache_resolve: 2]
 ```
 
-An occurence of `resolve` can now be replaced `cache_resolve`:
+`resolve` can now be replaced with `cache_resolve`:
 
 ```elixir
 field :metric_metadata, :metric_metadata do
@@ -74,7 +84,7 @@ field :metric_metadata, :metric_metadata do
 end
 ```
 
-There are two options to configure the TTL:
+There are two options to configure the TTL (time to live):
 
 ```elixir
 field :metric_metadata, :metric_metadata do
@@ -83,8 +93,54 @@ field :metric_metadata, :metric_metadata do
 end
 ```
 
-- :ttl - For how long (in seconds) should the value be cached.
-- :max_ttl_offset - Extend the TTL with a random number of seconds in the interval `[0; max_ttl_offset]`. The value is not completely random - it will be the same for the same resolver and arguments pairs. This is useful in avoiding [cache stampede](https://en.wikipedia.org/wiki/Cache_stampede) problems.
+- :ttl - For how long (in seconds) should the value be cached. Defaults to 300 seconds.
+- :max_ttl_offset - Extend the TTL with a random number of seconds in the interval `[0; max_ttl_offset]`. The value is not completely random - it will be the same for the same resolver and arguments pairs. This is useful in avoiding [cache stampede](https://en.wikipedia.org/wiki/Cache_stampede) problems. Defaults to 120 seconds.
+
+### Example 2:
+
+**Problem**: There is a query `get_users` which returns a list of `:user`s. The USD balance of a user is computed by the `usd_balance/3` function. The problem is that the balance is needed in some special cases only, so it is not a good idea to always compute it and fill it in `get_users/3`. On the other hand, when we return big lists of users (over 1000), the `usd_balance/3` function will be called once for every user. Even if we use `cache_resolve`, processing the query will make 1000 calls to the cache to fill all the data. It would be nice to be able to fill all this data at once, wouldn't it? Let's explore how this can be done. Here is the schema:
+
+```elixir
+object :user do
+  field(:id, non_null(:id))
+  field(:email, :string)
+  field(:username, :string)
+  ...
+  field :usd_balance, :integer do
+    resolve(&UserResolver.usd_balance/3)
+  end
+end
+
+field :get_users, list_of(:user) do
+  resolve(&UserResolver.get_users/3)
+end
+```
+
+The first step is modifying the Absinthe route in the router - the `:document_providers` and `:before_send` keys:
+
+```elixir
+forward(
+  ...
+  document_providers: [
+    AbsintheCache.DocumentProvider,
+    Absinthe.Plug.DocumentProvider.Default
+  ],
+  ...
+  before_send: {AbsintheCache.AbsintheBeforeSend, :before_send}
+  ...
+)
+```
+
+(TODO: Configure without the config.exs file)
+
+The next step is providing a list of queries that need to be resolved. In your config file add:
+
+```elixir
+config :myapp, AbsintheCache,
+  cached_queries: ["get_users"]
+```
+
+In order to understand how this works see the Internals section.
 
 ## Internals
 
