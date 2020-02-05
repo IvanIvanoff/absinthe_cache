@@ -14,7 +14,7 @@ Goals:
 - Production tested.
 - Easy to start using - just start the cache backend (using [con_cache](https://github.com/sasa1977/con_cache) by default) and replace the `resolve` macro with `cache_resolve`.
 - `cache_resolve` provides out of the box support for resolvers that do not immediately return a result, but are using `async` or `dataloader`.
-- Solves the problem of executing many resolvers for one query <sup>1</sup>.
+- Solves the problem of executing many resolvers for one query <sup> 1 </sup>.
 - Pluggable cache backend. You do not like `con_cache` or want to use `Redis` so the cache is shared between multiple nodes? Just implement a behavior with 5 functions
 
 > <sup> 1 </sup> A query that returns a list of 1000 objects with each of them running 3 resolvers, the query will have in total `1 + 1000 * 3 = 3001` resolvers being run. Even if these resolvers are cached, this means that 3001 cache calls have to be made. In order to solve this issue, `AbsintheCache` allows you to plug in the request's processing pipeline, skip the whole resolution phase and inject the final result directly. The final result is the result after all resolvers have run.
@@ -96,7 +96,7 @@ end
 - :ttl - For how long (in seconds) should the value be cached. Defaults to 300 seconds.
 - :max_ttl_offset - Extend the TTL with a random number of seconds in the interval `[0; max_ttl_offset]`. The value is not completely random - it will be the same for the same resolver and arguments pairs. This is useful in avoiding [cache stampede](https://en.wikipedia.org/wiki/Cache_stampede) problems. Defaults to 120 seconds.
 
-### Example 2:
+### Example 2
 
 **Problem**: There is a query `get_users` which returns a list of `:user`s. The USD balance of a user is computed by the `usd_balance/3` function. The problem is that the balance is needed in some special cases only, so it is not a good idea to always compute it and fill it in `get_users/3`. On the other hand, when we return big lists of users (over 1000), the `usd_balance/3` function will be called once for every user. Even if we use `cache_resolve`, processing the query will make 1000 calls to the cache to fill all the data. It would be nice to be able to fill all this data at once, wouldn't it? Let's explore how this can be done. Here is the schema:
 
@@ -116,7 +116,15 @@ field :get_users, list_of(:user) do
 end
 ```
 
-The first step is modifying the Absinthe route in the router - the `:document_providers` and `:before_send` keys:
+The first step is defining which queries are to be cached. This is done in the following way:
+
+```elixir
+defmodule MyAppWeb.Graphql.AbsintheBeforeSend do
+  use AbsintheCache.BeforeSend, cached_queries: ["get_users"]
+end
+```
+
+The next step is modifying the Absinthe route in the router file - the `:document_providers` and `:before_send` keys need to be updated to:
 
 ```elixir
 forward(
@@ -126,29 +134,18 @@ forward(
     Absinthe.Plug.DocumentProvider.Default
   ],
   ...
-  before_send: {AbsintheCache.AbsintheBeforeSend, :before_send}
+  before_send: {MyAppWeb.Graphql.AbsintheBeforeSend, :before_send}
   ...
 )
 ```
 
-(TODO: Configure without the config.exs file)
-
-The next step is providing a list of queries that need to be resolved. In your config file add:
-
-```elixir
-config :myapp, AbsintheCache,
-  cached_queries: ["get_users"]
-```
-
-In order to understand how this works see the Internals section.
-
 ## Internals
 
-### How does `cache_resolve` work?
+### How does `cache_resolve` work
 
 TODO
 
-### How does caching of the whole query execution work?
+### How does caching of the whole query execution work
 
 TODO
 
