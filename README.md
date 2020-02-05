@@ -7,6 +7,7 @@ Goals:
 - Easy to use.
 - Easy to change the cache backend used.
 - Flexible and configurable for the more complicated cases.
+- Do not use config files.
 
 ## Why use AbsintheCache
 
@@ -123,6 +124,18 @@ defmodule MyAppWeb.Graphql.AbsintheBeforeSend do
   use AbsintheCache.BeforeSend, cached_queries: ["get_users"]
 end
 ```
+
+Then you need to decide for how long to cache them:
+
+```elixir
+
+defmodule MyAppWeb.Graphql.DocumentProvider do
+  use AbsintheCache.DocumentProvider, ttl: 300, max_ttl_offset: 120
+end
+```
+
+Those modules are actually doing a lot more than just defining queries and ttl options.
+To understand what really happens check the Internals section
 
 The next step is modifying the Absinthe route in the router file - the `:document_providers` and `:before_send` keys need to be updated to:
 
