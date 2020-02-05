@@ -74,25 +74,26 @@ defmodule AbsintheCache.DocumentProvider do
         use Absinthe.Phase
 
         @compile :inline_list_funcs
-        @compile inline: [add_cache_key_to_blueprint: 2, cache_key_from_params: 2]
+        @compile inline: [add_cache_key_to_context: 2, cache_key_from_params: 2]
 
         # Access opts from the surrounding `AbsintheCache.DocumentProvider` module
         @ttl Keyword.get(opts, :ttl, 120)
         @max_ttl_ffset Keyword.get(opts, :max_ttl_offset, 60)
+        @cache_key_fun Keyword.get(opts, :additional_cache_key_args_fun, fn _ -> :ok end)
 
         @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
         def run(bp_root, _) do
-          permissions = bp_root.execution.context.permissions
+          additonal_args = @cache_key_fun.(bp_root)
 
           cache_key =
             AbsintheCache.cache_key(
-              {"bp_root", permissions},
+              {"bp_root", additonal_args} |> :erlang.phash2(),
               santize_blueprint(bp_root),
               ttl: @ttl,
               max_ttl_offset: @max_ttl_ffset
             )
 
-          bp_root = add_cache_key_to_blueprint(bp_root, cache_key)
+          bp_root = add_cache_key_to_context(bp_root, cache_key)
 
           case AbsintheCache.get(cache_key) do
             nil ->
@@ -108,7 +109,8 @@ defmodule AbsintheCache.DocumentProvider do
           end
         end
 
-        defp add_cache_key_to_blueprint(
+        # TODO: Make this function configurable
+        defp add_cache_key_to_context(
                %{execution: %{context: context} = execution} = blueprint,
                cache_key
              ) do
@@ -117,6 +119,8 @@ defmodule AbsintheCache.DocumentProvider do
             | execution: %{execution | context: Map.put(context, :query_cache_key, cache_key)}
           }
         end
+
+        defp add_cache_key_to_context(bp, _), do: bp
 
         # Leave only the fields that are needed to generate the cache key.
         # This allows us to cache with values that are interpolated into the query
