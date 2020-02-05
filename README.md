@@ -143,7 +143,7 @@ The next step is modifying the Absinthe route in the router file - the `:documen
 forward(
   ...
   document_providers: [
-    AbsintheCache.DocumentProvider,
+    MyAppWeb.Graphql.DocumentProvider,
     Absinthe.Plug.DocumentProvider.Default
   ],
   ...
