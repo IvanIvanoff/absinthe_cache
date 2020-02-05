@@ -20,122 +20,171 @@ defmodule AbsintheCache.DocumentProvider do
 
   Finally, there's a `before_send` hook that adds the result into the cache.
   """
-  @behaviour Absinthe.Plug.DocumentProvider
 
-  @doc false
-  @impl true
-  def pipeline(%Absinthe.Plug.Request.Query{pipeline: pipeline}) do
-    pipeline
-    |> Absinthe.Pipeline.insert_before(
-      Absinthe.Phase.Document.Execution.Resolution,
-      Graphql.Phase.Document.Execution.CacheDocument
-    )
-    |> Absinthe.Pipeline.insert_after(
-      Absinthe.Phase.Document.Result,
-      Graphql.Phase.Document.Execution.Idempotent
-    )
-  end
+  defmacro __using__(opts) do
+    quote location: :keep, bind_quoted: [opts: opts] do
+      @behaviour Absinthe.Plug.DocumentProvider
 
-  @doc false
-  @impl true
-  def process(%Absinthe.Plug.Request.Query{document: nil} = query, _), do: {:cont, query}
-  def process(%Absinthe.Plug.Request.Query{document: _} = query, _), do: {:halt, query}
-end
+      @doc false
+      @impl true
+      def pipeline(%Absinthe.Plug.Request.Query{pipeline: pipeline}) do
+        pipeline
+        |> Absinthe.Pipeline.insert_before(
+          Absinthe.Phase.Document.Execution.Resolution,
+          CacheDocument
+        )
+        |> Absinthe.Pipeline.insert_after(
+          Absinthe.Phase.Document.Result,
+          Idempotent
+        )
+      end
 
-defmodule Graphql.Phase.Document.Execution.CacheDocument do
-  @moduledoc ~s"""
-  Custom phase for obtaining the result from cache.
-  In case the value is not present in the cache, the default `Resolution` and
-  `Result` phases are run. Otherwise the custom `Resolution` phase is run and
-  `Result` is jumped over.
+      @doc false
+      @impl true
+      def process(%Absinthe.Plug.Request.Query{document: nil} = query, _), do: {:cont, query}
+      def process(%Absinthe.Plug.Request.Query{document: _} = query, _), do: {:halt, query}
 
-  When calculating the cache key only some of the fields of the whole blueprint
-  are used. They are defined in the module attribute @cache_fields. The only
-  values that are converted to something else in the process of construction
-  of the cache key are:
-  - DateTime - It is rounded by TTL so all datetiems in a range yield the same
-   cache key
-  - Struct - All structs are converted to plain maps
-  """
+      defmodule Idempotent do
+        @moduledoc ~s"""
+        A no-op phase inserted after the Absinthe's `Result` phase.
+        If the needed value is found in the cache, `CacheDocument` phase jumps to
+        `Idempotent` one so the Absinthe's `Resolution` and `Result` phases are skipped.
+        """
+        use Absinthe.Phase
+        @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
+        def run(bp_root, _), do: {:ok, bp_root}
+      end
 
-  use Absinthe.Phase
+      defmodule CacheDocument do
+        @moduledoc ~s"""
+        Custom phase for obtaining the result from cache.
+        In case the value is not present in the cache, the default `Resolution` and
+        `Result` phases are run. Otherwise the custom `Resolution` phase is run and
+        `Result` is jumped over.
 
-  @compile inline: [add_cache_key_to_blueprint: 2]
+        When calculating the cache key only some of the fields of the whole blueprint
+        are used. They are defined in the module attribute @cache_fields. The only
+        values that are converted to something else in the process of construction
+        of the cache key are:
+        - DateTime - It is rounded by TTL so all datetiems in a range yield the same
+         cache key
+        - Struct - All structs are converted to plain maps
+        """
 
-  @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
-  def run(bp_root, _) do
-    permissions = bp_root.execution.context.permissions
+        use Absinthe.Phase
 
-    cache_key =
-      AbsintheCache.cache_key(
-        {"bp_root", permissions},
-        santize_blueprint(bp_root),
-        ttl: 120,
-        max_ttl_offset: 90
-      )
+        @compile :inline_list_funcs
+        @compile inline: [add_cache_key_to_blueprint: 2, cache_key_from_params: 2]
 
-    bp_root = add_cache_key_to_blueprint(bp_root, cache_key)
+        # Access opts from the surrounding `AbsintheCache.DocumentProvider` module
+        @ttl Keyword.get(opts, :ttl, 120)
+        @max_ttl_ffset Keyword.get(opts, :max_ttl_offset, 60)
 
-    case AbsintheCache.get(cache_key) do
-      nil ->
-        {:ok, bp_root}
+        @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
+        def run(bp_root, _) do
+          permissions = bp_root.execution.context.permissions
 
-      result ->
-        # Storing it again `touch`es it and the TTL timer is restarted.
-        # This can lead to infinite storing the same value
-        Process.put(:do_not_cache_query, true)
+          cache_key =
+            AbsintheCache.cache_key(
+              {"bp_root", permissions},
+              santize_blueprint(bp_root),
+              ttl: @ttl,
+              max_ttl_offset: @max_ttl_ffset
+            )
 
-        {:jump, %{bp_root | result: result}, AbsintheCache.Phase.Document.Execution.Idempotent}
+          bp_root = add_cache_key_to_blueprint(bp_root, cache_key)
+
+          case AbsintheCache.get(cache_key) do
+            nil ->
+              {:ok, bp_root}
+
+            result ->
+              # Storing it again `touch`es it and the TTL timer is restarted.
+              # This can lead to infinite storing the same value
+              Process.put(:do_not_cache_query, true)
+
+              {:jump, %{bp_root | result: result},
+               AbsintheCache.Phase.Document.Execution.Idempotent}
+          end
+        end
+
+        defp add_cache_key_to_blueprint(
+               %{execution: %{context: context} = execution} = blueprint,
+               cache_key
+             ) do
+          %{
+            blueprint
+            | execution: %{execution | context: Map.put(context, :query_cache_key, cache_key)}
+          }
+        end
+
+        # Leave only the fields that are needed to generate the cache key.
+        # This allows us to cache with values that are interpolated into the query
+        # string itself. The datetimes are rounded so all datetimes in a bucket
+        # generate the same cache key.
+        defp santize_blueprint(%DateTime{} = dt), do: dt
+        defp santize_blueprint({:argument_data, _} = tuple), do: tuple
+        defp santize_blueprint({a, b}), do: {a, santize_blueprint(b)}
+
+        @cache_fields [
+          :name,
+          :argument_data,
+          :selection_set,
+          :selections,
+          :fragments,
+          :operations,
+          :alias
+        ]
+        defp santize_blueprint(map) when is_map(map) do
+          Map.take(map, @cache_fields)
+          |> Enum.map(&santize_blueprint/1)
+          |> Map.new()
+        end
+
+        defp santize_blueprint(list) when is_list(list) do
+          Enum.map(list, &santize_blueprint/1)
+        end
+
+        defp santize_blueprint(data), do: data
+
+        # Extract the query and variables from the params map and genenrate
+        # a cache key using them.
+
+        # The query is fetched as is.
+        # The variables that are valid datetime types (have the `from` or `to` name
+        # and valid value) are converted to Elixir DateTime type prior to being used.
+        # This is done because the datetimes are rounded so all datetimes in a N minute
+        # buckets have the same cache key.
+
+        # The other param types are not cast as they would be used the same way in both
+        # places where the cache key is calculated.
+        defp cache_key_from_params(params, permissions) do
+          query = Map.get(params, "query", "")
+
+          variables =
+            case Map.get(params, "variables") do
+              map when is_map(map) -> map
+              vars when is_binary(vars) and vars != "" -> vars |> Jason.decode!()
+              _ -> %{}
+            end
+            |> Enum.map(fn
+              {key, value} when is_binary(value) ->
+                case DateTime.from_iso8601(value) do
+                  {:ok, datetime, _} -> {key, datetime}
+                  _ -> {key, value}
+                end
+
+              pair ->
+                pair
+            end)
+            |> Map.new()
+
+          AbsintheCache.cache_key({query, permissions}, variables,
+            ttl: @ttl,
+            max_ttl_offset: @max_ttl_ffset
+          )
+        end
+      end
     end
   end
-
-  defp add_cache_key_to_blueprint(
-         %{execution: %{context: context} = execution} = blueprint,
-         cache_key
-       ) do
-    %{
-      blueprint
-      | execution: %{execution | context: Map.put(context, :query_cache_key, cache_key)}
-    }
-  end
-
-  # Leave only the fields that are needed to generate the cache key.
-  # This allows us to cache with values that are interpolated into the query
-  # string itself. The datetimes are rounded so all datetimes in a bucket
-  # generate the same cache key.
-  defp santize_blueprint(%DateTime{} = dt), do: dt
-  defp santize_blueprint({:argument_data, _} = tuple), do: tuple
-  defp santize_blueprint({a, b}), do: {a, santize_blueprint(b)}
-
-  @cache_fields [
-    :name,
-    :argument_data,
-    :selection_set,
-    :selections,
-    :fragments,
-    :operations,
-    :alias
-  ]
-  defp santize_blueprint(map) when is_map(map) do
-    Map.take(map, @cache_fields)
-    |> Enum.map(&santize_blueprint/1)
-    |> Map.new()
-  end
-
-  defp santize_blueprint(list) when is_list(list) do
-    Enum.map(list, &santize_blueprint/1)
-  end
-
-  defp santize_blueprint(data), do: data
-end
-
-defmodule AbsintheCache.Phase.Document.Execution.Idempotent do
-  @moduledoc ~s"""
-  A no-op phase inserted after the Absinthe's `Result` phase.
-  If the needed value is found in the cache, `CacheDocument` phase jumps to
-  `Idempotent` one so the Absinthe's `Resolution` and `Result` phases are skipped.
-  """
-  use Absinthe.Phase
-  @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
-  def run(bp_root, _), do: {:ok, bp_root}
 end
