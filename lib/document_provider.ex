@@ -57,6 +57,7 @@ defmodule Graphql.Phase.Document.Execution.CacheDocument do
    cache key
   - Struct - All structs are converted to plain maps
   """
+
   use Absinthe.Phase
 
   @compile inline: [add_cache_key_to_blueprint: 2]
