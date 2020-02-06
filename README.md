@@ -1,5 +1,9 @@
 # AbsintheCache
 
+This project is in very early development phase. This is the extracted version of the caching layer developed at [sanbase](https://github.com/santiment/sanbase2). There are still parts that are connected with its original repository and there are still parts that are not configurable enough. All these things are going to change.
+
+---
+
 Caching solution for the Elixir's [GraphQL](http://spec.graphql.org/) server [Absinthe](https://github.com/absinthe-graphql/absinthe).
 
 Goals:
