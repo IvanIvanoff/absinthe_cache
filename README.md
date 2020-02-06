@@ -156,11 +156,27 @@ forward(
 
 ### How does `cache_resolve` work
 
-TODO
+Following is a high level overview of the internal working of `cache_resolve`. For complete understaning please read the source code.
+
+`cache_resolve` works by wrapping the function that computes the result. The wrapper computes a cache key from the function name and arguments (if anonymous function is passed then a function name must be explicitly given). The wrapper function checks for a stored value
+corresponding to the cache key. If there is such - the value is returned and the function computation is skipped, thus avoiding running a slow function. If there is not a stored value - the function
+is comptued, the value is stored in the cache under the given cache key and the result is returned.
+If `async` or `dataloader` are used the approach is the same excluding some imlementation details. In both cases there is a zero or one arity
+functions that can be wrapped and cached.
+If there are many concurrent requests for the same query only one process will acquire a lock and run the actual computations. The other processes will wait on the lock and get the computed data once it's ready.
 
 ### How does caching of the whole query execution work
 
-TODO
+The work here is split into two major parts - a custom [DocumentProvider](https://hexdocs.pm/absinthe_plug/Absinthe.Plug.DocumentProvider.html) and a [before send hook](https://hexdocs.pm/absinthe_plug/Absinthe.Plug.html#module-before-send).
+Shortly said, the document provider sets up the pipeline of phases that are going to run (around 40 of them) and the before send hook is usually used to modify the Plug connection right before the result is being sent.
+
+The default document provider has two phases that are importat to `AbsintheCache` - the Resolution phase and the Result phase - these are the phases where the resolvers run and the result is constructed.
+
+The custom document provider defines the same pipeline as the default one but inserts two extra phases - Cache phrase is inserted before the Resolution phase and Idempotent phase is inserted after Result phase (usually the last one).
+
+The Cache phase constructs a cache key out of the query name, arguments and variables in a smart way - it can work both with interpolated variables in the query string and by separately passed variables. If the constructed cache key has a corresponding cached value it is taken and the execution "jumps" over the Resolution and Result phases directly to the Idempotent phase that does nothing. It is needed because the Result phase is the last one but the Cache needs to jump right after it.
+
+The before send hook is executed after all phases have run. If computed value has not been taken from the cache, this is the step where it is inserted into the cache. It's done here because we need the "constructed" result after all resolvers are run and their results are merged into one. The cached value is actually a json string - the result that is sent to the client. Storing it in this form allows the execution to totally skip the resolution and result building phases.
 
 ## Installation
 
