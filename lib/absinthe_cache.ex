@@ -129,18 +129,13 @@ defmodule AbsintheCache do
   # Private functions
 
   defp resolver(resolver_fn, name, opts) do
+    root_key = Keyword.get(opts, :root_key, :id)
     # Works only for top-level resolvers and fields with root object that has `id` field
     fn
-      %{id: id} = root, args, resolution ->
+      %{^root_key => key} = root, args, resolution ->
         fun = fn -> resolver_fn.(root, args, resolution) end
 
-        cache_key({name, id, resolution.source}, args, opts)
-        |> get_or_store(fun)
-
-      %{word: word} = root, args, resolution ->
-        fun = fn -> resolver_fn.(root, args, resolution) end
-
-        cache_key({name, word, resolution.source}, args, opts)
+        cache_key({name, key, resolution.source}, args, opts)
         |> get_or_store(fun)
 
       %{}, args, resolution ->
