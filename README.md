@@ -94,7 +94,7 @@ There are two options to configure the TTL (time to live):
 ```elixir
 field :metric_metadata, :metric_metadata do
   arg(:metric, non_null(:string))
-  resolve(&MetricResolver.get_metadata/3, ttl: 60, max_ttl_offset: 60)
+  cache_resolve(&MetricResolver.get_metadata/3, ttl: 60, max_ttl_offset: 60)
 end
 ```
 
