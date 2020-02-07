@@ -130,18 +130,22 @@ defmodule AbsintheCache do
 
   defp resolver(resolver_fn, name, opts) do
     root_key = Keyword.get(opts, :root_key, :id)
+    additonal_args_fun = Keyword.get(opts, :resolution_fun, fn _ -> nil end)
+
     # Works only for top-level resolvers and fields with root object that has `id` field
     fn
       %{^root_key => key} = root, args, resolution ->
         fun = fn -> resolver_fn.(root, args, resolution) end
+        additional_args = additonal_args_fun.(resolution)
 
-        cache_key({name, key, resolution.source}, args, opts)
+        cache_key({name, key, resolution.source, additional_args}, args, opts)
         |> get_or_store(fun)
 
       %{}, args, resolution ->
         fun = fn -> resolver_fn.(%{}, args, resolution) end
+        additional_args = additonal_args_fun.(resolution)
 
-        cache_key({name, resolution.source}, args, opts)
+        cache_key({name, resolution.source, additional_args}, args, opts)
         |> get_or_store(fun)
     end
   end
