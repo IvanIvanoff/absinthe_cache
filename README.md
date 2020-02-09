@@ -41,9 +41,23 @@ Full repo example can be found [here](https://github.com/IvanIvanoff/absinthe_ca
 
 ---
 
-### Example 1
+### Example I
 
-**Problem**: There is a function `MetricResolver.get_metadata/3` that returns the metadata for a given metric. This function takes a lot of time to compute as it fetches data from three different databases and from elasticsearch. The solution to this is to cache it for 5 minutes.
+**Problem**
+
+---
+
+The `MetricResolver.get_metadata/3` function returns the metadata for a given metric. It takes a lot of time to compute as it fetches data from three different databases and from elasticsearch. The solution to this is to cache it for 5 minutes.
+
+**Solution**
+
+---
+
+Cache the result for 5 minutes.
+
+**Steps**
+
+---
 
 In order to cache the resolver the following steps must be done:
 
@@ -101,9 +115,25 @@ end
 - :ttl - For how long (in seconds) should the value be cached. Defaults to 300 seconds.
 - :max_ttl_offset - Extend the TTL with a random number of seconds in the interval `[0; max_ttl_offset]`. The value is not completely random - it will be the same for the same resolver and arguments pairs. This is useful in avoiding [cache stampede](https://en.wikipedia.org/wiki/Cache_stampede) problems. Defaults to 120 seconds.
 
-### Example 2
+### Example II
 
-**Problem**: There is a query `get_users` which returns a list of `:user`s. The USD balance of a user is computed by the `usd_balance/3` function. The problem is that the balance is needed in some special cases only, so it is not a good idea to always compute it and fill it in `get_users/3`. On the other hand, when we return big lists of users (over 1000), the `usd_balance/3` function will be called once for every user. Even if we use `cache_resolve`, processing the query will make 1000 calls to the cache to fill all the data. It would be nice to be able to fill all this data at once, wouldn't it? Let's explore how this can be done. Here is the schema:
+**Problem**
+
+---
+
+The `get_users` query returns `list_of(:user)`. The USD balance of a user is computed by the `usd_balance/3` function.The balance is needed in some special cases only, so it is not a good idea to always compute it and fill it in `get_users/3`. When we return big lists of users, the `usd_balance/3` function will be called once for every user. Even if we use dataloader and compute the result wiht a single query, in the end there would be thousands of function invocations (or cache calls if we also use `cache_resolve`) which would slow down the execution
+
+**Solution**
+
+---
+
+Compute the data and cache the result **after** all resolvers are finished. This way the next query that hits the cache will make a single cache call to load all the data.
+
+**Steps**
+
+---
+
+Let's have the query and types definition as follows:
 
 ```elixir
 object :user do
