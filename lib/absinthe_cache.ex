@@ -4,15 +4,18 @@ defmodule AbsintheCache do
   caches the result of the resolver for some time instead of calculating it
   every time.
   """
+
+  alias __MODULE__, as: CacheMod
+  alias AbsintheCache.ConCacheProvider, as: CacheProvider
+
   require Logger
 
   @ttl 300
   @max_ttl_offset 120
 
-  # TODO: Configurable
+  # TODO: Make it configurable
   @cache_name :graphql_cache
 
-  @compile :inline_list_funcs
   @compile {:inline,
             wrap: 2,
             wrap: 3,
@@ -24,24 +27,21 @@ defmodule AbsintheCache do
             get_or_store: 3,
             cache_modify_middleware: 3,
             cache_key: 2,
-            convert_values: 2}
-
-  alias __MODULE__, as: CacheMod
-  # TODO: Make configurable
-  alias AbsintheCache.ConCacheProvider, as: CacheProvider
+            convert_values: 2,
+            generate_additional_args: 1}
 
   @doc ~s"""
   Macro that's used instead of Absinthe's `resolve`. This resolver can perform
   the following operations:
-  1. Get the stored value if there is one. The resolver function is not
-  evaluated at all in this case.
+  1. Get the value from a cache if it is persisted. The resolver function is not
+  evaluated at all in this case
   2. Evaluate the resolver function and store the value in the cache if it is
-  not present there.
+  not present there
   3. Handle the `Absinthe.Middlewar.Async` and `Absinthe.Middleware.Dataloader`
   middlewares. In order to handle them, the function that executes the actual
   evaluation is wrapped in a function that handles the cache interactions
 
-  There are two options for the passed function:
+  There are 2 options for the passed function:
   1. It can be a captured named function because its name is extracted
   and used in the cache key.
   2. If the function is anonymous or a different name should be used, a second
@@ -129,20 +129,45 @@ defmodule AbsintheCache do
   # Private functions
 
   defp resolver(resolver_fn, name, opts) do
-    root_key = Keyword.get(opts, :root_key, :id)
-    # Works only for top-level resolvers and fields with root object that has `id` field
     fn
-      %{^root_key => key} = root, args, resolution ->
+      %{} = root, args, resolution ->
         fun = fn -> resolver_fn.(root, args, resolution) end
 
-        cache_key({name, key, resolution.source}, args, opts)
-        |> get_or_store(fun)
+        # by default use only :id from the root
+        root_keys = Keyword.get(opts, :root_keys, [:id])
+        additional_args = Map.take(root, root_keys)
 
-      %{}, args, resolution ->
-        fun = fn -> resolver_fn.(%{}, args, resolution) end
+        # resolution.source contains the arguments passed to a parent object
+        # in order to properly cache timeseries data in the query
+        # {getMetric(metric: "nvt") {timeseriesData(...)}}
+        # the key must include `metric` from the parent's args
+        args_from_source = generate_additional_args(resolution.source)
 
-        cache_key({name, resolution.source}, args, opts)
-        |> get_or_store(fun)
+        cache_key = cache_key({name, additional_args, args_from_source}, args, opts)
+
+        # In some edge-cases the caching can be disabled for some reason. In one
+        # particular case for all_projects_by_function the caching is disabled
+        # (by putting the do_not_cache_query: true Process dictionary key-value)
+        # if the base_projects depends on a watchlist. The cache resolver that
+        # is disabled must provide the `honor_do_no_cache_flag: true` explicitly,
+        # so we are not disabling all of the caching, but only the one that matters
+        skip_cache? =
+          Keyword.get(opts, :honor_do_not_cache_flag, false) and
+            Process.get(:do_not_cache_query) == true
+
+        case skip_cache? do
+          true -> fun.()
+          false -> get_or_store(cache_key, fun)
+        end
+    end
+  end
+
+  defp generate_additional_args(data) do
+    case data do
+      %{id: id} -> id
+      %{slug: slug} -> slug
+      %{word: word} -> word
+      _ -> data
     end
   end
 
@@ -201,29 +226,36 @@ defmodule AbsintheCache do
   # Helper functions
 
   def cache_key(name, args, opts \\ []) do
-    base_ttl = Keyword.get(opts, :ttl, @ttl)
-    max_ttl_offset = Keyword.get(opts, :max_ttl_offset, @max_ttl_offset)
-    slug = Map.get(args, :slug, "")
+    base_ttl = args[:caching_params][:base_ttl] || Keyword.get(opts, :ttl, @ttl)
 
-    ttl = base_ttl + ({name, slug} |> :erlang.phash2(max_ttl_offset))
+    max_ttl_offset =
+      args[:caching_params][:max_ttl_offset] ||
+        Keyword.get(opts, :max_ttl_offset, @max_ttl_offset)
 
-    args =
-      args
-      |> convert_values(ttl)
+    base_ttl = Enum.max([base_ttl, 1])
+    max_ttl_offset = Enum.max([max_ttl_offset, 1])
 
-    cache_key =
-      [name, args]
-      |> :erlang.phash2()
+    # Used to randomize the TTL for lists of objects like list of projects
+    additional_args = Map.take(args, [:slug, :id])
+
+    # Using phash2 as a random number between 0 and max_ttl_offset is needed.
+    # collisions are allowed and do not lead to errors
+    ttl = base_ttl + ({name, additional_args} |> :erlang.phash2(max_ttl_offset))
+
+    if args[:caching_params] do
+      # This is used in the Absinthe's before_send function
+      Process.put(:__change_absinthe_before_send_caching_ttl__, ttl)
+    end
+
+    args = args |> convert_values(ttl)
+    cache_key = [name, args] |> hash()
 
     {cache_key, ttl}
   end
 
   # Convert the values for using in the cache. A special treatement is done for
   # `%DateTime{}` so all datetimes in a @ttl sized window are treated the same
-  defp convert_values(%DateTime{} = v, ttl) do
-    div(DateTime.to_unix(v, :second), ttl)
-  end
-
+  defp convert_values(%DateTime{} = v, ttl), do: div(DateTime.to_unix(v, :second), ttl)
   defp convert_values(%_{} = v, _), do: Map.from_struct(v)
 
   defp convert_values(args, ttl) when is_list(args) or is_map(args) do
@@ -238,4 +270,9 @@ defmodule AbsintheCache do
   end
 
   defp convert_values(v, _), do: v
+
+  defp hash(data) do
+    :crypto.hash(:sha256, :erlang.term_to_binary(data))
+    |> Base.encode64()
+  end
 end
