@@ -1,6 +1,8 @@
 # AbsintheCache
 
-This project is in very early development phase. This is the extracted version of the caching layer developed at [sanbase](https://github.com/santiment/sanbase2). There are still parts that are connected with its original repository and there are still parts that are not configurable enough. All these things are going to change.
+This project is in an early development phase. This is the extracted version of the caching layer developed at [sanbase](https://github.com/santiment/sanbase2). There are still parts that are connected with its original repository and there are still parts that are not configurable enough. All these things are going to change.
+
+This repository might not be updated often as the place where it originated has still not moved to using this as a library. The code is in active use, bug reports are going to be addressed and pull requests are welcomed.
 
 ---
 
