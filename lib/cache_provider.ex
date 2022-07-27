@@ -1,4 +1,4 @@
-defmodule AbsintheCache.CacheProvider do
+defmodule AbsintheCache.Behaviour do
   @moduledoc """
   Behaviour that the cache needs to conform to.
   """

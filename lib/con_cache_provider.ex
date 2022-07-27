@@ -1,8 +1,8 @@
 defmodule AbsintheCache.ConCacheProvider do
   @moduledoc ~s"""
-  Implements AbsintheCache.CacheProvider for con_cache
+  Implements AbsintheCache.Behaviour for con_cache
   """
-  @behaviour AbsintheCache.CacheProvider
+  @behaviour AbsintheCache.Behaviour
 
   @compile {:inline,
             get: 2,
@@ -14,12 +14,12 @@ defmodule AbsintheCache.ConCacheProvider do
 
   @max_cache_ttl 7200
 
-  @impl AbsintheCache.CacheProvider
+  @impl AbsintheCache.Behaviour
   def start_link(opts) do
     ConCache.start_link(opts(opts))
   end
 
-  @impl AbsintheCache.CacheProvider
+  @impl AbsintheCache.Behaviour
   def child_spec(opts) do
     Supervisor.child_spec({ConCache, opts(opts)}, id: Keyword.fetch!(opts, :id))
   end
@@ -33,14 +33,14 @@ defmodule AbsintheCache.ConCacheProvider do
     ]
   end
 
-  @impl AbsintheCache.CacheProvider
+  @impl AbsintheCache.Behaviour
   def size(cache) do
     bytes_size = :ets.info(ConCache.ets(cache), :memory) * :erlang.system_info(:wordsize)
 
     _megabytes_size = (bytes_size / (1024 * 1024)) |> Float.round(2)
   end
 
-  @impl AbsintheCache.CacheProvider
+  @impl AbsintheCache.Behaviour
   def count(cache) do
     cache
     |> ConCache.ets()
@@ -48,7 +48,7 @@ defmodule AbsintheCache.ConCacheProvider do
     |> length
   end
 
-  @impl AbsintheCache.CacheProvider
+  @impl AbsintheCache.Behaviour
   def clear_all(cache) do
     cache
     |> ConCache.ets()
@@ -56,7 +56,7 @@ defmodule AbsintheCache.ConCacheProvider do
     |> Enum.each(fn {key, _} -> ConCache.delete(cache, key) end)
   end
 
-  @impl AbsintheCache.CacheProvider
+  @impl AbsintheCache.Behaviour
   def get(cache, key) do
     case ConCache.get(cache, true_key(key)) do
       {:stored, value} -> value
@@ -64,7 +64,7 @@ defmodule AbsintheCache.ConCacheProvider do
     end
   end
 
-  @impl AbsintheCache.CacheProvider
+  @impl AbsintheCache.Behaviour
   def store(cache, key, value) do
     case value do
       {:error, _} ->
@@ -79,7 +79,7 @@ defmodule AbsintheCache.ConCacheProvider do
     end
   end
 
-  @impl AbsintheCache.CacheProvider
+  @impl AbsintheCache.Behaviour
   def get_or_store(cache, key, func, cache_modify_middleware) do
     # Do not include the TTL as part of the key name.
     true_key = true_key(key)

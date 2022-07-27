@@ -1,6 +1,6 @@
 if Code.ensure_loaded?(Cachex) do
   defmodule AbsintheCache.CachexProvider do
-    @behaviour AbsintheCache.CacheProvider
+    @behaviour AbsintheCache.Behaviour
     @default_ttl_seconds 300
 
     @max_lock_acquired_time_ms 60_000
@@ -13,12 +13,12 @@ if Code.ensure_loaded?(Cachex) do
                obtain_lock: 3
              ]
 
-    @impl AbsintheCache.CacheProvider
+    @impl AbsintheCache.Behaviour
     def start_link(opts) do
       Cachex.start_link(opts(opts))
     end
 
-    @impl AbsintheCache.CacheProvider
+    @impl AbsintheCache.Behaviour
     def child_spec(opts) do
       Supervisor.child_spec({Cachex, opts(opts)}, id: Keyword.fetch!(opts, :id))
     end
@@ -43,25 +43,25 @@ if Code.ensure_loaded?(Cachex) do
       ]
     end
 
-    @impl AbsintheCache.CacheProvider
+    @impl AbsintheCache.Behaviour
     def size(cache) do
       {:ok, bytes_size} = Cachex.inspect(cache, {:memory, :bytes})
       (bytes_size / (1024 * 1024)) |> Float.round(2)
     end
 
-    @impl AbsintheCache.CacheProvider
+    @impl AbsintheCache.Behaviour
     def count(cache) do
       {:ok, count} = Cachex.size(cache)
       count
     end
 
-    @impl AbsintheCache.CacheProvider
+    @impl AbsintheCache.Behaviour
     def clear_all(cache) do
       {:ok, _} = Cachex.clear(cache)
       :ok
     end
 
-    @impl AbsintheCache.CacheProvider
+    @impl AbsintheCache.Behaviour
     def get(cache, key) do
       case Cachex.get(cache, true_key(key)) do
         {:ok, {:stored, value}} -> value
@@ -69,7 +69,7 @@ if Code.ensure_loaded?(Cachex) do
       end
     end
 
-    @impl AbsintheCache.CacheProvider
+    @impl AbsintheCache.Behaviour
     def store(cache, key, value) do
       case value do
         {:error, _} ->
@@ -85,7 +85,7 @@ if Code.ensure_loaded?(Cachex) do
       end
     end
 
-    @impl AbsintheCache.CacheProvider
+    @impl AbsintheCache.Behaviour
     def get_or_store(cache, key, func, cache_modify_middleware) do
       true_key = true_key(key)
 
