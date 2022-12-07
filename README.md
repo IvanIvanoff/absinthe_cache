@@ -17,9 +17,8 @@ Goals:
 
 ## Why use AbsintheCache
 
-- No other full-blown solution currently exists.
 - Production tested.
-- Easy to start using - just start the cache backend (using [con_cache](https://github.com/sasa1977/con_cache) by default) and replace the `resolve` macro with `cache_resolve`.
+- Easy to start using - just start the cache backend (integrated [cachex](https://github.com/whitfin/cachex) and [con_cache](https://github.com/sasa1977/con_cache)) and replace the `resolve` macro with `cache_resolve`.
 - `cache_resolve` provides out of the box support for resolvers that do not immediately return a result, but are using `async` or `dataloader`.
 - Solves the problem of executing many resolvers for one query <sup> 1 </sup>.
 - Pluggable cache backend. You do not like `con_cache` or want to use `Redis` so the cache is shared between multiple nodes? Just implement a behavior with 5 functions
