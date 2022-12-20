@@ -83,12 +83,12 @@ defmodule AbsintheCache.DocumentProvider do
 
         @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
         def run(bp_root, _) do
-          additonal_args = @cache_key_fun.(bp_root)
+          additional_args = @cache_key_fun.(bp_root)
 
           cache_key =
             AbsintheCache.cache_key(
-              {"bp_root", additonal_args} |> :erlang.phash2(),
-              santize_blueprint(bp_root),
+              {"bp_root", additional_args} |> :erlang.phash2(),
+              sanitize_blueprint(bp_root),
               ttl: @ttl,
               max_ttl_offset: @max_ttl_ffset
             )
@@ -126,9 +126,9 @@ defmodule AbsintheCache.DocumentProvider do
         # This allows us to cache with values that are interpolated into the query
         # string itself. The datetimes are rounded so all datetimes in a bucket
         # generate the same cache key.
-        defp santize_blueprint(%DateTime{} = dt), do: dt
-        defp santize_blueprint({:argument_data, _} = tuple), do: tuple
-        defp santize_blueprint({a, b}), do: {a, santize_blueprint(b)}
+        defp sanitize_blueprint(%DateTime{} = dt), do: dt
+        defp sanitize_blueprint({:argument_data, _} = tuple), do: tuple
+        defp sanitize_blueprint({a, b}), do: {a, sanitize_blueprint(b)}
 
         @cache_fields [
           :name,
@@ -139,17 +139,17 @@ defmodule AbsintheCache.DocumentProvider do
           :operations,
           :alias
         ]
-        defp santize_blueprint(map) when is_map(map) do
+        defp sanitize_blueprint(map) when is_map(map) do
           Map.take(map, @cache_fields)
-          |> Enum.map(&santize_blueprint/1)
+          |> Enum.map(&sanitize_blueprint/1)
           |> Map.new()
         end
 
-        defp santize_blueprint(list) when is_list(list) do
-          Enum.map(list, &santize_blueprint/1)
+        defp sanitize_blueprint(list) when is_list(list) do
+          Enum.map(list, &sanitize_blueprint/1)
         end
 
-        defp santize_blueprint(data), do: data
+        defp sanitize_blueprint(data), do: data
 
         # Extract the query and variables from the params map and genenrate
         # a cache key using them.

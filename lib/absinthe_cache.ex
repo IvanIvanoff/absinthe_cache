@@ -47,7 +47,7 @@ defmodule AbsintheCache do
   2. If the function is anonymous or a different name should be used, a second
   parameter with that name must be passed.
 
-  Just like `resolve` comming from Absinthe, `cache_resolve` supports the `{:ok, value}`
+  Just like `resolve` coming from Absinthe, `cache_resolve` supports the `{:ok, value}`
   and `{:error, reason}` result tuples. The `:ok` tuples are cached while the `:error`
   tuples are not.
 
@@ -184,8 +184,8 @@ defmodule AbsintheCache do
     )
   end
 
-  # `cache_modify_middleware` is called only from withing `get_or_store` that
-  # guarantees that it will be executed only once if it is accessed concurently.
+  # `cache_modify_middleware` is called only from within `get_or_store` that
+  # guarantees that it will be executed only once if it is accessed concurrently.
   # This is way it is safe to use `store` explicitly without worrying about race
   # conditions
   defp cache_modify_middleware(cache_name, cache_key, {:ok, value} = result) do
@@ -253,7 +253,7 @@ defmodule AbsintheCache do
     {cache_key, ttl}
   end
 
-  # Convert the values for using in the cache. A special treatement is done for
+  # Convert the values for using in the cache. A special treatment is done for
   # `%DateTime{}` so all datetimes in a @ttl sized window are treated the same
   defp convert_values(%DateTime{} = v, ttl), do: div(DateTime.to_unix(v, :second), ttl)
   defp convert_values(%_{} = v, _), do: Map.from_struct(v)

@@ -32,7 +32,7 @@ defmodule AbsintheCache.BeforeSend do
       @cached_queries Keyword.get(opts, :cached_queries, [])
       def before_send(conn, %Absinthe.Blueprint{} = blueprint) do
         # Do not cache in case of:
-        # -`:nocache` returend from a resolver
+        # -`:nocache` returned from a resolver
         # - result is taken from the cache and should not be stored again. Storing
         # it again `touch`es it and the TTL timer is restarted. This can lead
         # to infinite storing the same value if there are enough requests
@@ -49,9 +49,9 @@ defmodule AbsintheCache.BeforeSend do
       end
 
       defp cache_result(queries, blueprint) do
-        all_queries_cachable? = queries |> Enum.all?(&Enum.member?(@cached_queries, &1))
+        all_queries_cacheable? = queries |> Enum.all?(&Enum.member?(@cached_queries, &1))
 
-        if all_queries_cachable? do
+        if all_queries_cacheable? do
           AbsintheCache.store(
             blueprint.execution.context.query_cache_key,
             blueprint.result
