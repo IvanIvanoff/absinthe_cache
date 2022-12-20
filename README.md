@@ -123,7 +123,7 @@ end
 
 ---
 
-The `get_users` query returns `list_of(:user)`. The USD balance of a user is computed by the `usd_balance/3` function.The balance is needed in some special cases only, so it is not a good idea to always compute it and fill it in `get_users/3`. When we return big lists of users, the `usd_balance/3` function will be called once for every user. Even if we use dataloader and compute the result wiht a single query, in the end there would be thousands of function invocations (or cache calls if we also use `cache_resolve`) which would slow down the execution
+The `get_users` query returns `list_of(:user)`. The USD balance of a user is computed by the `usd_balance/3` function.The balance is needed in some special cases only, so it is not a good idea to always compute it and fill it in `get_users/3`. When we return big lists of users, the `usd_balance/3` function will be called once for every user. Even if we use dataloader and compute the result with a single query, in the end there would be thousands of function invocations (or cache calls if we also use `cache_resolve`) which would slow down the execution
 
 **Solution**
 
@@ -197,7 +197,7 @@ Following is a high level overview of the internal working of `cache_resolve`. F
 `cache_resolve` works by wrapping the function that computes the result. The wrapper computes a cache key from the function name and arguments (if anonymous function is passed then a function name must be explicitly given). The wrapper function checks for a stored value
 corresponding to the cache key. If there is such - the value is returned and the function computation is skipped, thus avoiding running a slow function. If there is not a stored value - the function
 is comptued, the value is stored in the cache under the given cache key and the result is returned.
-If `async` or `dataloader` are used the approach is the same excluding some imlementation details. In both cases there is a zero or one arity
+If `async` or `dataloader` are used the approach is the same excluding some implementation details. In both cases there is a zero or one arity
 functions that can be wrapped and cached.
 If there are many concurrent requests for the same query only one process will acquire a lock and run the actual computations. The other processes will wait on the lock and get the computed data once it's ready.
 
@@ -206,7 +206,7 @@ If there are many concurrent requests for the same query only one process will a
 The work here is split into two major parts - a custom [DocumentProvider](https://hexdocs.pm/absinthe_plug/Absinthe.Plug.DocumentProvider.html) and a [before send hook](https://hexdocs.pm/absinthe_plug/Absinthe.Plug.html#module-before-send).
 Shortly said, the document provider sets up the pipeline of phases that are going to run (around 40 of them) and the before send hook is usually used to modify the Plug connection right before the result is being sent.
 
-The default document provider has two phases that are importat to `AbsintheCache` - the Resolution phase and the Result phase - these are the phases where the resolvers run and the result is constructed.
+The default document provider has two phases that are important to `AbsintheCache` - the Resolution phase and the Result phase - these are the phases where the resolvers run and the result is constructed.
 
 The custom document provider defines the same pipeline as the default one but inserts two extra phases - Cache phrase is inserted before the Resolution phase and Idempotent phase is inserted after Result phase (usually the last one).
 
