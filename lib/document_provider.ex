@@ -79,7 +79,13 @@ defmodule AbsintheCache.DocumentProvider do
         # Access opts from the surrounding `AbsintheCache.DocumentProvider` module
         @ttl Keyword.get(opts, :ttl, 120)
         @max_ttl_ffset Keyword.get(opts, :max_ttl_offset, 60)
-        @cache_key_fun Keyword.get(opts, :additional_cache_key_args_fun, fn _ -> :ok end)
+        @cache_key_fun Keyword.get(
+                         opts,
+                         :additional_cache_key_args_fun,
+                         &__MODULE__.additional_cache_key_args_fun_default/1
+                       )
+
+        def additional_cache_key_args_fun_default(_), do: :ok
 
         @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
         def run(bp_root, _) do
