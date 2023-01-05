@@ -110,8 +110,7 @@ defmodule AbsintheCache.DocumentProvider do
               # This can lead to infinite storing the same value
               Process.put(:do_not_cache_query, true)
 
-              {:jump, %{bp_root | result: result},
-               AbsintheCache.Phase.Document.Execution.Idempotent}
+              {:jump, %{bp_root | result: result}, AbsintheCache.DocumentProvider.Idempotent}
           end
         end
 
