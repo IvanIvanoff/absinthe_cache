@@ -21,6 +21,17 @@ defmodule AbsintheCache.DocumentProvider do
   Finally, there's a `before_send` hook that adds the result into the cache.
   """
 
+  defmodule Idempotent do
+    @moduledoc ~s"""
+    A no-op phase inserted after the Absinthe's `Result` phase.
+    If the needed value is found in the cache, `CacheDocument` phase jumps to
+    `Idempotent` one so the Absinthe's `Resolution` and `Result` phases are skipped.
+    """
+    use Absinthe.Phase
+    @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
+    def run(bp_root, _), do: {:ok, bp_root}
+  end
+
   defmacro __using__(opts) do
     quote location: :keep, bind_quoted: [opts: opts] do
       @behaviour Absinthe.Plug.DocumentProvider
@@ -35,7 +46,7 @@ defmodule AbsintheCache.DocumentProvider do
         )
         |> Absinthe.Pipeline.insert_after(
           Absinthe.Phase.Document.Result,
-          __MODULE__.Idempotent
+          AbsintheCache.DocumentProvider.Idempotent
         )
       end
 
@@ -43,17 +54,6 @@ defmodule AbsintheCache.DocumentProvider do
       @impl true
       def process(%Absinthe.Plug.Request.Query{document: nil} = query, _), do: {:cont, query}
       def process(%Absinthe.Plug.Request.Query{document: _} = query, _), do: {:halt, query}
-
-      defmodule Idempotent do
-        @moduledoc ~s"""
-        A no-op phase inserted after the Absinthe's `Result` phase.
-        If the needed value is found in the cache, `CacheDocument` phase jumps to
-        `Idempotent` one so the Absinthe's `Resolution` and `Result` phases are skipped.
-        """
-        use Absinthe.Phase
-        @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
-        def run(bp_root, _), do: {:ok, bp_root}
-      end
 
       defmodule CacheDocument do
         @moduledoc ~s"""
