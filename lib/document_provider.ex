@@ -31,11 +31,11 @@ defmodule AbsintheCache.DocumentProvider do
         pipeline
         |> Absinthe.Pipeline.insert_before(
           Absinthe.Phase.Document.Execution.Resolution,
-          CacheDocument
+          __MODULE__.CacheDocument
         )
         |> Absinthe.Pipeline.insert_after(
           Absinthe.Phase.Document.Result,
-          Idempotent
+          __MODULE__.Idempotent
         )
       end
 
