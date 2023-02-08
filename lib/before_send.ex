@@ -38,7 +38,7 @@ defmodule AbsintheCache.BeforeSend do
         # to infinite storing the same value if there are enough requests
 
         queries = queries_in_request(blueprint)
-        do_not_cache? = is_nil(Process.get(:do_not_cache_query))
+        do_not_cache? = Process.get(:do_not_cache_query) != nil
 
         case do_not_cache? or has_graphql_errors?(blueprint) do
           true -> :ok

@@ -21,6 +21,17 @@ defmodule AbsintheCache.DocumentProvider do
   Finally, there's a `before_send` hook that adds the result into the cache.
   """
 
+  defmodule Idempotent do
+    @moduledoc ~s"""
+    A no-op phase inserted after the Absinthe's `Result` phase.
+    If the needed value is found in the cache, `CacheDocument` phase jumps to
+    `Idempotent` one so the Absinthe's `Resolution` and `Result` phases are skipped.
+    """
+    use Absinthe.Phase
+    @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
+    def run(bp_root, _), do: {:ok, bp_root}
+  end
+
   defmacro __using__(opts) do
     quote location: :keep, bind_quoted: [opts: opts] do
       @behaviour Absinthe.Plug.DocumentProvider
@@ -31,11 +42,11 @@ defmodule AbsintheCache.DocumentProvider do
         pipeline
         |> Absinthe.Pipeline.insert_before(
           Absinthe.Phase.Document.Execution.Resolution,
-          CacheDocument
+          __MODULE__.CacheDocument
         )
         |> Absinthe.Pipeline.insert_after(
           Absinthe.Phase.Document.Result,
-          Idempotent
+          AbsintheCache.DocumentProvider.Idempotent
         )
       end
 
@@ -43,17 +54,6 @@ defmodule AbsintheCache.DocumentProvider do
       @impl true
       def process(%Absinthe.Plug.Request.Query{document: nil} = query, _), do: {:cont, query}
       def process(%Absinthe.Plug.Request.Query{document: _} = query, _), do: {:halt, query}
-
-      defmodule Idempotent do
-        @moduledoc ~s"""
-        A no-op phase inserted after the Absinthe's `Result` phase.
-        If the needed value is found in the cache, `CacheDocument` phase jumps to
-        `Idempotent` one so the Absinthe's `Resolution` and `Result` phases are skipped.
-        """
-        use Absinthe.Phase
-        @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
-        def run(bp_root, _), do: {:ok, bp_root}
-      end
 
       defmodule CacheDocument do
         @moduledoc ~s"""
@@ -79,7 +79,13 @@ defmodule AbsintheCache.DocumentProvider do
         # Access opts from the surrounding `AbsintheCache.DocumentProvider` module
         @ttl Keyword.get(opts, :ttl, 120)
         @max_ttl_ffset Keyword.get(opts, :max_ttl_offset, 60)
-        @cache_key_fun Keyword.get(opts, :additional_cache_key_args_fun, fn _ -> :ok end)
+        @cache_key_fun Keyword.get(
+                         opts,
+                         :additional_cache_key_args_fun,
+                         &__MODULE__.additional_cache_key_args_fun_default/1
+                       )
+
+        def additional_cache_key_args_fun_default(_), do: :ok
 
         @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
         def run(bp_root, _) do
@@ -104,8 +110,7 @@ defmodule AbsintheCache.DocumentProvider do
               # This can lead to infinite storing the same value
               Process.put(:do_not_cache_query, true)
 
-              {:jump, %{bp_root | result: result},
-               AbsintheCache.Phase.Document.Execution.Idempotent}
+              {:jump, %{bp_root | result: result}, AbsintheCache.DocumentProvider.Idempotent}
           end
         end
 
