@@ -55,7 +55,7 @@ defmodule AbsintheCache.DocumentProvider do
         are used. They are defined in the module attribute @cache_fields. The only
         values that are converted to something else in the process of construction
         of the cache key are:
-        - DateTime - It is rounded by TTL so all datetiems in a range yield the same
+        - DateTime - It is rounded by TTL so all datetimes in a range yield the same
          cache key
         - Struct - All structs are converted to plain maps
         """

@@ -21,7 +21,7 @@ defmodule AbsintheCache do
   evaluated at all in this case
   2. Evaluate the resolver function and store the value in the cache if it is
   not present there
-  3. Handle the `Absinthe.Middlewar.Async` and `Absinthe.Middleware.Dataloader`
+  3. Handle the `Absinthe.Middleware.Async` and `Absinthe.Middleware.Dataloader`
   middlewares. In order to handle them, the function that executes the actual
   evaluation is wrapped in a function that handles the cache interactions
 
@@ -84,7 +84,7 @@ defmodule AbsintheCache do
   end
 
   @doc ~s"""
-  Clears the whole cache. Slow.
+  Clears the whole cache.
   """
   def clear_all() do
     CacheProvider.clear_all(@cache_name)
@@ -144,7 +144,7 @@ defmodule AbsintheCache do
         # particular case for all_projects_by_function the caching is disabled
         # (by putting the do_not_cache_query: true Process dictionary key-value)
         # if the base_projects depends on a watchlist. The cache resolver that
-        # is disabled must provide the `honor_do_no_cache_flag: true` explicitly,
+        # is disabled must provide the `honor_do_not_cache_flag: true` explicitly,
         # so we are not disabling all of the caching, but only the one that matters
         skip_cache? =
           Keyword.get(opts, :honor_do_not_cache_flag, false) and

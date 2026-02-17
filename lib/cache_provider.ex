@@ -8,8 +8,6 @@ defmodule AbsintheCache.Behaviour do
   @type error :: String.t()
   @type stored_value :: any()
   @type cache :: atom()
-  @type size_type :: :megabytes
-
   @callback start_link(Keyword.t()) :: {:ok, pid}
 
   @callback child_spec(Keyword.t()) :: Supervisor.child_spec()

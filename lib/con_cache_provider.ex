@@ -29,7 +29,7 @@ defmodule AbsintheCache.ConCacheProvider do
   def size(cache) do
     bytes_size = :ets.info(ConCache.ets(cache), :memory) * :erlang.system_info(:wordsize)
 
-    _megabytes_size = (bytes_size / (1024 * 1024)) |> Float.round(2)
+    (bytes_size / (1024 * 1024)) |> Float.round(2)
   end
 
   @impl AbsintheCache.Behaviour
@@ -44,6 +44,8 @@ defmodule AbsintheCache.ConCacheProvider do
     cache
     |> ConCache.ets()
     |> :ets.delete_all_objects()
+
+    :ok
   end
 
   @impl AbsintheCache.Behaviour
