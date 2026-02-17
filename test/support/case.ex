@@ -6,6 +6,8 @@ defmodule AbsintheCache.TestCase do
 
     quote do
       use ExUnit.Case, async: unquote(async)
+      # import (not use) so we control ExUnit.Case and async; Plug.Test/Plug.Conn
+      # provide conn/2, put_req_header/3, etc. needed for HTTP tests.
       import Plug.Test
       import Plug.Conn
 

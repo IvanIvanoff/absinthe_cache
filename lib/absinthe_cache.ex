@@ -276,11 +276,14 @@ defmodule AbsintheCache do
 
     args = args |> convert_values(ttl)
 
-    # Include the current datetime bucket to relieve some locking issues. If a process
-    # somehow does not release a lock, force the key to change after the base_ttl + max_ttl_offset
-    # time passes by including this rounded datetime to the cache key.
-    # Adding a random value between 0 and 180 based on the query and slug used helps
-    # avoid the thundering herd issue
+    # Bucket-based invalidation: include the current datetime bucket in the key so that
+    # keys rotate over time. This relieves locking issues—if a process fails to release
+    # a lock, the key will change after the bucket TTL (see below) and the lock becomes
+    # irrelevant. Tradeoff: the same query can produce different keys in different
+    # buckets, reducing cache hit rate near bucket boundaries. Bucket duration is
+    # base_ttl + max_ttl_offset + phash2(..., 180), i.e. base_ttl + max_ttl_offset + 0..179
+    # seconds, so buckets change roughly every (base_ttl + max_ttl_offset) seconds with
+    # some jitter to avoid thundering herd.
     bucket_ttl = base_ttl + max_ttl_offset + :erlang.phash2({name, args}, 180)
     current_bucket = convert_values(DateTime.utc_now(), bucket_ttl)
 

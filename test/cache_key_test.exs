@@ -8,6 +8,9 @@ defmodule AbsintheCache.CacheKeyTest do
       assert is_integer(ttl)
     end
 
+    # Cache keys include a time-based bucket (see AbsintheCache.cache_key/3). Two calls
+    # in the same bucket produce the same key; calls across a bucket boundary do not.
+    # We use async: false so both calls run in the same process without delay.
     test "same inputs produce same key when called quickly" do
       {key1, ttl1} = AbsintheCache.cache_key(:same_resolver, %{slug: "bitcoin"})
       {key2, ttl2} = AbsintheCache.cache_key(:same_resolver, %{slug: "bitcoin"})

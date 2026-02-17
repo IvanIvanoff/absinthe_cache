@@ -1,5 +1,13 @@
 if Code.ensure_loaded?(Cachex) do
   defmodule AbsintheCache.CachexProvider do
+    @moduledoc """
+    Cachex-based implementation of `AbsintheCache.Behaviour`.
+
+    Values are stored gzipped to reduce memory use. This format is not shared with
+    `AbsintheCache.ConCacheProvider` (in-memory); ConCache is typically used for
+    development/single-node, while Cachex is used when persistence or larger
+    caches are needed.
+    """
     @behaviour AbsintheCache.Behaviour
     @default_ttl_seconds 300
 
@@ -194,9 +202,13 @@ if Code.ensure_loaded?(Cachex) do
     end
 
     defp decompress_value(value) do
-      value
-      |> :zlib.gunzip()
-      |> :erlang.binary_to_term([:safe])
+      try do
+        value
+        |> :zlib.gunzip()
+        |> :erlang.binary_to_term([:safe])
+      rescue
+        _ -> nil
+      end
     end
   end
 end
