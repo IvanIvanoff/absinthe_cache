@@ -65,6 +65,7 @@ defmodule AbsintheCache.DocumentProvider do
         # Access opts from the surrounding `AbsintheCache.DocumentProvider` module
         @ttl Keyword.get(opts, :ttl, 120)
         @max_ttl_offset Keyword.get(opts, :max_ttl_offset, 60)
+        @context_cache_key Keyword.get(opts, :context_cache_key, :query_cache_key)
         @cache_key_fun Keyword.get(
                          opts,
                          :additional_cache_key_args_fun,
@@ -94,20 +95,19 @@ defmodule AbsintheCache.DocumentProvider do
             result ->
               # Storing it again `touch`es it and the TTL timer is restarted.
               # This can lead to infinite storing the same value
-              Process.put(:do_not_cache_query, true)
+              Process.put(:__do_not_cache_query__, true)
 
               {:jump, %{bp_root | result: result}, AbsintheCache.Phase.Document.Idempotent}
           end
         end
 
-        # TODO: Make this function configurable
         defp add_cache_key_to_context(
                %{execution: %{context: context} = execution} = blueprint,
                cache_key
              ) do
           %{
             blueprint
-            | execution: %{execution | context: Map.put(context, :query_cache_key, cache_key)}
+            | execution: %{execution | context: Map.put(context, @context_cache_key, cache_key)}
           }
         end
 

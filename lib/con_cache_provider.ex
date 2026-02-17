@@ -63,7 +63,6 @@ defmodule AbsintheCache.ConCacheProvider do
         :ok
 
       {:nocache, _} ->
-        Process.put(:has_nocache_field, true)
         :ok
 
       value ->
@@ -121,7 +120,7 @@ defmodule AbsintheCache.ConCacheProvider do
         middleware_func.(cache, key, tuple)
 
       {:nocache, {:ok, _result} = value} ->
-        Process.put(:do_not_cache_query, true)
+        Process.put(:__do_not_cache_query__, true)
         value
 
       {:ok, _value} = ok_tuple ->

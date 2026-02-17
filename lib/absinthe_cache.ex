@@ -3,16 +3,44 @@ defmodule AbsintheCache do
   Provides the macro `cache_resolve` that replaces the Absinthe's `resolve` and
   caches the result of the resolver for some time instead of calculating it
   every time.
+
+  ## Configuration
+
+  All settings are optional and have sensible defaults:
+
+      config :absinthe_cache,
+        cache_name: :graphql_cache,
+        cache_provider: AbsintheCache.ConCacheProvider,
+        ttl: 300,
+        max_ttl_offset: 120
+
+  - `:cache_name` — the registered name of the cache process (default: `:graphql_cache`)
+  - `:cache_provider` — module implementing `AbsintheCache.Behaviour` (default: `AbsintheCache.ConCacheProvider`)
+  - `:ttl` — base time-to-live in seconds for cached entries (default: `300`)
+  - `:max_ttl_offset` — maximum random offset added to TTL to avoid cache stampede (default: `120`)
+
+  ## Process dictionary keys
+
+  This library communicates between modules via the process dictionary:
+
+  - `:__do_not_cache_query__` — when set to `true`, signals that the current query
+    should not be cached. Set by providers when `{:nocache, {:ok, value}}` is returned,
+    and by `DocumentProvider` on cache hits (to avoid re-storing). Read by `cache_resolve`
+    (with `honor_do_not_cache_flag: true`) and `BeforeSend`.
+  - `:__change_absinthe_before_send_caching_ttl__` — when `caching_params` are provided
+    in the query args, this is set to the computed TTL. Read by `BeforeSend` to override
+    the TTL when storing the full query result.
   """
 
   alias __MODULE__, as: CacheMod
-  alias AbsintheCache.ConCacheProvider, as: CacheProvider
 
-  @ttl 300
-  @max_ttl_offset 120
+  @default_ttl 300
+  @default_max_ttl_offset 120
 
-  # TODO: Make it configurable
-  @cache_name :graphql_cache
+  defp cache_name, do: Application.get_env(:absinthe_cache, :cache_name, :graphql_cache)
+  defp cache_provider, do: Application.get_env(:absinthe_cache, :cache_provider, AbsintheCache.ConCacheProvider)
+  defp default_ttl, do: Application.get_env(:absinthe_cache, :ttl, @default_ttl)
+  defp default_max_ttl_offset, do: Application.get_env(:absinthe_cache, :max_ttl_offset, @default_max_ttl_offset)
 
   @doc ~s"""
   Macro that's used instead of Absinthe's `resolve`. This resolver can perform
@@ -70,8 +98,8 @@ defmodule AbsintheCache do
   """
   def wrap(cached_func, name, args \\ %{}, opts \\ []) do
     fn ->
-      CacheProvider.get_or_store(
-        @cache_name,
+      cache_provider().get_or_store(
+        cache_name(),
         cache_key(name, args, opts),
         cached_func,
         &cache_modify_middleware/3
@@ -80,32 +108,32 @@ defmodule AbsintheCache do
   end
 
   def child_spec(opts) do
-    CacheProvider.child_spec(opts)
+    cache_provider().child_spec(opts)
   end
 
   @doc ~s"""
   Clears the whole cache.
   """
   def clear_all() do
-    CacheProvider.clear_all(@cache_name)
+    cache_provider().clear_all(cache_name())
   end
 
   @doc ~s"""
   The size of the cache in megabytes
   """
   def size() do
-    CacheProvider.size(@cache_name)
+    cache_provider().size(cache_name())
   end
 
   @doc ~s"""
   The number of entries in the cache
   """
   def count() do
-    CacheProvider.count(@cache_name)
+    cache_provider().count(cache_name())
   end
 
   def get(key) do
-    CacheProvider.get(@cache_name, key)
+    cache_provider().get(cache_name(), key)
   end
 
   @doc false
@@ -148,7 +176,7 @@ defmodule AbsintheCache do
         # so we are not disabling all of the caching, but only the one that matters
         skip_cache? =
           Keyword.get(opts, :honor_do_not_cache_flag, false) and
-            Process.get(:do_not_cache_query) == true
+            Process.get(:__do_not_cache_query__) == true
 
         case skip_cache? do
           true -> fun.()
@@ -166,12 +194,16 @@ defmodule AbsintheCache do
     end
   end
 
-  def store(cache_name \\ @cache_name, cache_key, value) do
-    CacheProvider.store(cache_name, cache_key, value)
+  def store(cache_key, value), do: store(cache_name(), cache_key, value)
+
+  def store(cache_name, cache_key, value) do
+    cache_provider().store(cache_name, cache_key, value)
   end
 
-  def get_or_store(cache_name \\ @cache_name, cache_key, resolver_fn) do
-    CacheProvider.get_or_store(
+  def get_or_store(cache_key, resolver_fn), do: get_or_store(cache_name(), cache_key, resolver_fn)
+
+  def get_or_store(cache_name, cache_key, resolver_fn) do
+    cache_provider().get_or_store(
       cache_name,
       cache_key,
       resolver_fn,
@@ -184,7 +216,7 @@ defmodule AbsintheCache do
   # This is way it is safe to use `store` explicitly without worrying about race
   # conditions
   defp cache_modify_middleware(cache_name, cache_key, {:ok, value} = result) do
-    CacheProvider.store(cache_name, cache_key, result)
+    cache_provider().store(cache_name, cache_key, result)
 
     {:ok, value}
   end
@@ -195,7 +227,7 @@ defmodule AbsintheCache do
          {:middleware, Absinthe.Middleware.Async = midl, {fun, opts}}
        ) do
     caching_fun = fn ->
-      CacheProvider.get_or_store(cache_name, cache_key, fun, &cache_modify_middleware/3)
+      cache_provider().get_or_store(cache_name, cache_key, fun, &cache_modify_middleware/3)
     end
 
     {:middleware, midl, {caching_fun, opts}}
@@ -207,7 +239,7 @@ defmodule AbsintheCache do
          {:middleware, Absinthe.Middleware.Dataloader = midl, {loader, callback}}
        ) do
     caching_callback = fn loader_arg ->
-      CacheProvider.get_or_store(
+      cache_provider().get_or_store(
         cache_name,
         cache_key,
         fn -> callback.(loader_arg) end,
@@ -221,11 +253,11 @@ defmodule AbsintheCache do
   # Helper functions
 
   def cache_key(name, args, opts \\ []) do
-    base_ttl = args[:caching_params][:base_ttl] || Keyword.get(opts, :ttl, @ttl)
+    base_ttl = args[:caching_params][:base_ttl] || Keyword.get(opts, :ttl, default_ttl())
 
     max_ttl_offset =
       args[:caching_params][:max_ttl_offset] ||
-        Keyword.get(opts, :max_ttl_offset, @max_ttl_offset)
+        Keyword.get(opts, :max_ttl_offset, default_max_ttl_offset())
 
     base_ttl = max(base_ttl, 1)
     max_ttl_offset = max(max_ttl_offset, 1)
@@ -258,7 +290,7 @@ defmodule AbsintheCache do
   end
 
   # Convert the values for using in the cache. A special treatment is done for
-  # `%DateTime{}` so all datetimes in a @ttl sized window are treated the same
+  # `%DateTime{}` so all datetimes in a TTL sized window are treated the same
   defp convert_values(%DateTime{} = v, ttl), do: div(DateTime.to_unix(v, :second), ttl)
   defp convert_values(%_{} = v, _), do: Map.from_struct(v)
 

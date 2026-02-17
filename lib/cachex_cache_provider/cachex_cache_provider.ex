@@ -73,8 +73,6 @@ if Code.ensure_loaded?(Cachex) do
           :ok
 
         {:nocache, _} ->
-          Process.put(:has_nocache_field, true)
-
           :ok
 
         _ ->
@@ -166,7 +164,7 @@ if Code.ensure_loaded?(Cachex) do
           cache_modify_middleware.(cache, key, tuple)
 
         {:nocache, {:ok, _result} = value} ->
-          Process.put(:do_not_cache_query, true)
+          Process.put(:__do_not_cache_query__, true)
           value
 
         {:error, _} = error ->

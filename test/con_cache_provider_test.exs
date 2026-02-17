@@ -37,11 +37,9 @@ defmodule AbsintheCache.ConCacheProviderTest do
       assert Provider.get(@cache_name, "err_key") == nil
     end
 
-    test "ignores {:nocache, value} and sets :has_nocache_field process flag" do
-      Process.delete(:has_nocache_field)
+    test "ignores {:nocache, value} — value is not persisted" do
       Provider.store(@cache_name, "nc_key", {:nocache, {:ok, "temp"}})
       assert Provider.get(@cache_name, "nc_key") == nil
-      assert Process.get(:has_nocache_field) == true
     end
   end
 
@@ -71,8 +69,8 @@ defmodule AbsintheCache.ConCacheProviderTest do
       assert :counters.get(call_count, 1) == 1
     end
 
-    test "with {:nocache, {:ok, value}} returns value, doesn't cache, sets :do_not_cache_query" do
-      Process.delete(:do_not_cache_query)
+    test "with {:nocache, {:ok, value}} returns value, doesn't cache, sets :__do_not_cache_query__" do
+      Process.delete(:__do_not_cache_query__)
 
       result =
         Provider.get_or_store(
@@ -83,7 +81,7 @@ defmodule AbsintheCache.ConCacheProviderTest do
         )
 
       assert result == {:ok, "temp_val"}
-      assert Process.get(:do_not_cache_query) == true
+      assert Process.get(:__do_not_cache_query__) == true
       assert Provider.get(@cache_name, "nocache_key") == nil
     end
 

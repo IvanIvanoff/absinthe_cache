@@ -95,7 +95,7 @@ defmodule AbsintheCacheTest do
 
     test "honor_do_not_cache_flag: true skips cache when process flag is set" do
       fun = fn ->
-        Process.put(:do_not_cache_query, true)
+        Process.put(:__do_not_cache_query__, true)
         Absinthe.run("{ cachedHonorFlag }", Schema, root_value: %{})
       end
 
@@ -105,7 +105,7 @@ defmodule AbsintheCacheTest do
     end
 
     test "honor_do_not_cache_flag: true still caches when flag is NOT set" do
-      Process.delete(:do_not_cache_query)
+      Process.delete(:__do_not_cache_query__)
 
       fun = fn ->
         Absinthe.run("{ cachedHonorFlag }", Schema, root_value: %{})
