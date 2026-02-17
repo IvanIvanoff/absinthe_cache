@@ -4,14 +4,6 @@ defmodule AbsintheCache.ConCacheProvider do
   """
   @behaviour AbsintheCache.Behaviour
 
-  @compile {:inline,
-            get: 2,
-            store: 3,
-            get_or_store: 4,
-            cache_item: 3,
-            get_or_store_isolated: 5,
-            execute_and_maybe_cache_function: 4}
-
   @max_cache_ttl 7200
 
   @impl AbsintheCache.Behaviour
@@ -44,16 +36,14 @@ defmodule AbsintheCache.ConCacheProvider do
   def count(cache) do
     cache
     |> ConCache.ets()
-    |> :ets.tab2list()
-    |> length
+    |> :ets.info(:size)
   end
 
   @impl AbsintheCache.Behaviour
   def clear_all(cache) do
     cache
     |> ConCache.ets()
-    |> :ets.tab2list()
-    |> Enum.each(fn {key, _} -> ConCache.delete(cache, key) end)
+    |> :ets.delete_all_objects()
   end
 
   @impl AbsintheCache.Behaviour
@@ -138,10 +128,12 @@ defmodule AbsintheCache.ConCacheProvider do
     end
   end
 
-  defp cache_item(cache, {key, ttl}, value) when is_integer(ttl) and ttl <= @max_cache_ttl do
+  defp cache_item(cache, {key, ttl}, value) when is_integer(ttl) do
+    clamped_ttl = min(ttl, @max_cache_ttl)
+
     ConCache.put(cache, key, %ConCache.Item{
       value: value,
-      ttl: :timer.seconds(ttl)
+      ttl: :timer.seconds(clamped_ttl)
     })
   end
 
@@ -149,6 +141,6 @@ defmodule AbsintheCache.ConCacheProvider do
     ConCache.put(cache, key, value)
   end
 
-  defp true_key({key, ttl}) when is_integer(ttl) and ttl <= @max_cache_ttl, do: key
+  defp true_key({key, ttl}) when is_integer(ttl), do: key
   defp true_key(key), do: key
 end

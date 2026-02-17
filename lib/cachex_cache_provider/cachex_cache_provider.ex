@@ -7,12 +7,6 @@ if Code.ensure_loaded?(Cachex) do
 
     import Cachex.Spec
 
-    @compile inline: [
-               execute_cache_miss_function: 4,
-               handle_execute_cache_miss_function: 4,
-               obtain_lock: 3
-             ]
-
     @impl AbsintheCache.Behaviour
     def start_link(opts) do
       Cachex.start_link(opts(opts))
@@ -171,8 +165,8 @@ if Code.ensure_loaded?(Cachex) do
         {:middleware, _, _} = tuple ->
           cache_modify_middleware.(cache, key, tuple)
 
-        {:nocache, value} ->
-          Process.put(:has_nocache_field, true)
+        {:nocache, {:ok, _result} = value} ->
+          Process.put(:do_not_cache_query, true)
           value
 
         {:error, _} = error ->
@@ -204,7 +198,7 @@ if Code.ensure_loaded?(Cachex) do
     defp decompress_value(value) do
       value
       |> :zlib.gunzip()
-      |> :erlang.binary_to_term()
+      |> :erlang.binary_to_term([:safe])
     end
   end
 end

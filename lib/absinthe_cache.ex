@@ -8,27 +8,11 @@ defmodule AbsintheCache do
   alias __MODULE__, as: CacheMod
   alias AbsintheCache.ConCacheProvider, as: CacheProvider
 
-  require Logger
-
   @ttl 300
   @max_ttl_offset 120
 
   # TODO: Make it configurable
   @cache_name :graphql_cache
-
-  @compile {:inline,
-            wrap: 2,
-            wrap: 3,
-            from: 2,
-            resolver: 3,
-            store: 2,
-            store: 3,
-            get_or_store: 2,
-            get_or_store: 3,
-            cache_modify_middleware: 3,
-            cache_key: 2,
-            convert_values: 2,
-            generate_additional_args: 1}
 
   @doc ~s"""
   Macro that's used instead of Absinthe's `resolve`. This resolver can perform
@@ -243,8 +227,8 @@ defmodule AbsintheCache do
       args[:caching_params][:max_ttl_offset] ||
         Keyword.get(opts, :max_ttl_offset, @max_ttl_offset)
 
-    base_ttl = Enum.max([base_ttl, 1])
-    max_ttl_offset = Enum.max([max_ttl_offset, 1])
+    base_ttl = max(base_ttl, 1)
+    max_ttl_offset = max(max_ttl_offset, 1)
 
     # Used to randomize the TTL for lists of objects like list of projects
     additional_args = Map.take(args, [:slug, :id])

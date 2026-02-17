@@ -26,9 +26,6 @@ defmodule AbsintheCache.BeforeSend do
 
   defmacro __using__(opts) do
     quote location: :keep, bind_quoted: [opts: opts] do
-      @compile :inline_list_funcs
-      @compile inline: [cache_result: 2, queries_in_request: 1, has_graphql_errors?: 1]
-
       @cached_queries Keyword.get(opts, :cached_queries, [])
       def before_send(conn, %Absinthe.Blueprint{} = blueprint) do
         # Do not cache in case of:
@@ -52,10 +49,10 @@ defmodule AbsintheCache.BeforeSend do
         all_queries_cacheable? = queries |> Enum.all?(&Enum.member?(@cached_queries, &1))
 
         if all_queries_cacheable? do
-          AbsintheCache.store(
-            get_cache_key(blueprint),
-            blueprint.result
-          )
+          case get_cache_key(blueprint) do
+            nil -> :ok
+            cache_key -> AbsintheCache.store(cache_key, blueprint.result)
+          end
         end
       end
 
@@ -67,13 +64,19 @@ defmodule AbsintheCache.BeforeSend do
       # and store it with a different ttl. The ttl is changed from the graphql cache
       # in case `caching_params` is provided.
       defp get_cache_key(blueprint) do
-        case Process.get(:__change_absinthe_before_send_caching_ttl__) do
-          ttl when is_number(ttl) ->
-            {cache_key, _old_ttl} = blueprint.execution.context.query_cache_key
-            {cache_key, ttl}
+        case blueprint do
+          %{execution: %{context: %{query_cache_key: query_cache_key}}} ->
+            case Process.get(:__change_absinthe_before_send_caching_ttl__) do
+              ttl when is_number(ttl) ->
+                {cache_key, _old_ttl} = query_cache_key
+                {cache_key, ttl}
+
+              _ ->
+                query_cache_key
+            end
 
           _ ->
-            blueprint.execution.context.query_cache_key
+            nil
         end
       end
 
