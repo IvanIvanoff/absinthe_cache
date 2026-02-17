@@ -1,10 +1,13 @@
 defmodule AbsintheCache.TestCase do
   use ExUnit.CaseTemplate
 
-  defmacro __using__(_) do
+  defmacro __using__(opts) do
+    async = Keyword.get(opts, :async, true)
+
     quote do
-      use ExUnit.Case, async: true
-      use Plug.Test
+      use ExUnit.Case, async: unquote(async)
+      import Plug.Test
+      import Plug.Conn
 
       import unquote(__MODULE__)
 
