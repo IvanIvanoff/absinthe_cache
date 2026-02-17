@@ -173,6 +173,11 @@ defmodule AbsintheCacheTest do
       assert AbsintheCache.get("direct_key") == {:ok, "direct_val"}
     end
 
+    test "store/2 uses the default cache name" do
+      AbsintheCache.store("two_arg_key", {:ok, "two_arg_val"})
+      assert AbsintheCache.get("two_arg_key") == {:ok, "two_arg_val"}
+    end
+
     test "get returns nil for missing key" do
       assert AbsintheCache.get("missing_key") == nil
     end
@@ -180,6 +185,55 @@ defmodule AbsintheCacheTest do
     test "store with {key, ttl} tuple" do
       AbsintheCache.store(:graphql_cache, {"ttl_key", 60}, {:ok, "ttl_val"})
       assert AbsintheCache.get({"ttl_key", 60}) == {:ok, "ttl_val"}
+    end
+
+    test "store with error is ignored" do
+      AbsintheCache.store("err_store", {:error, "bad"})
+      assert AbsintheCache.get("err_store") == nil
+    end
+
+    test "store with nocache is ignored" do
+      AbsintheCache.store("nc_store", {:nocache, {:ok, "temp"}})
+      assert AbsintheCache.get("nc_store") == nil
+    end
+
+    test "overwriting a key updates the value" do
+      AbsintheCache.store("overwrite", {:ok, "first"})
+      assert AbsintheCache.get("overwrite") == {:ok, "first"}
+      AbsintheCache.store("overwrite", {:ok, "second"})
+      assert AbsintheCache.get("overwrite") == {:ok, "second"}
+    end
+  end
+
+  describe "get_or_store/2" do
+    test "executes function on miss and caches the result" do
+      call_count = :counters.new(1, [:atomics])
+
+      fun = fn ->
+        :counters.add(call_count, 1, 1)
+        {:ok, "computed"}
+      end
+
+      {key, _ttl} = AbsintheCache.cache_key(:gos_test, %{})
+
+      assert AbsintheCache.get_or_store(key, fun) == {:ok, "computed"}
+      assert AbsintheCache.get_or_store(key, fun) == {:ok, "computed"}
+      assert :counters.get(call_count, 1) == 1
+    end
+
+    test "does not cache errors" do
+      call_count = :counters.new(1, [:atomics])
+
+      fun = fn ->
+        :counters.add(call_count, 1, 1)
+        {:error, "fail"}
+      end
+
+      {key, _ttl} = AbsintheCache.cache_key(:gos_err_test, %{})
+
+      assert AbsintheCache.get_or_store(key, fun) == {:error, "fail"}
+      assert AbsintheCache.get_or_store(key, fun) == {:error, "fail"}
+      assert :counters.get(call_count, 1) == 2
     end
   end
 

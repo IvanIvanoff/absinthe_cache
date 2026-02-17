@@ -137,6 +137,45 @@ defmodule AbsintheCache.ConCacheProviderTest do
       Provider.store(@cache_name, {"ttl_key", 60}, {:ok, "with_ttl"})
       assert Provider.get(@cache_name, {"ttl_key", 60}) == {:ok, "with_ttl"}
     end
+
+    test "TTL above max_cache_ttl (7200) is clamped, not rejected" do
+      Provider.store(@cache_name, {"big_ttl", 99_999}, {:ok, "big"})
+      assert Provider.get(@cache_name, {"big_ttl", 99_999}) == {:ok, "big"}
+    end
+
+    test "get_or_store works with {key, ttl} tuple keys" do
+      result =
+        Provider.get_or_store(
+          @cache_name,
+          {"gos_ttl", 60},
+          fn -> {:ok, "ttl_computed"} end,
+          &identity_middleware/3
+        )
+
+      assert result == {:ok, "ttl_computed"}
+      assert Provider.get(@cache_name, {"gos_ttl", 60}) == {:ok, "ttl_computed"}
+    end
+  end
+
+  describe "store/3 overwrite" do
+    test "storing to the same key overwrites the value" do
+      Provider.store(@cache_name, "ow_key", {:ok, "first"})
+      assert Provider.get(@cache_name, "ow_key") == {:ok, "first"}
+
+      Provider.store(@cache_name, "ow_key", {:ok, "second"})
+      assert Provider.get(@cache_name, "ow_key") == {:ok, "second"}
+    end
+  end
+
+  describe "clear_all/1 returns :ok" do
+    test "returns :ok on empty cache" do
+      assert Provider.clear_all(@cache_name) == :ok
+    end
+
+    test "returns :ok on non-empty cache" do
+      Provider.store(@cache_name, "clr_ret", {:ok, 1})
+      assert Provider.clear_all(@cache_name) == :ok
+    end
   end
 
   describe "concurrent get_or_store (thundering herd)" do
