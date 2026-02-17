@@ -64,8 +64,11 @@ if Code.ensure_loaded?(Cachex) do
     @impl AbsintheCache.Behaviour
     def get(cache, key) do
       case Cachex.get(cache, true_key(key)) do
-        {:ok, {:stored, value}} -> value
-        _ -> nil
+        {:ok, compressed_value} when is_binary(compressed_value) ->
+          decompress_value(compressed_value)
+
+        _ ->
+          nil
       end
     end
 
@@ -81,7 +84,7 @@ if Code.ensure_loaded?(Cachex) do
           :ok
 
         _ ->
-          cache_item(cache, key, {:stored, value})
+          cache_item(cache, key, value)
       end
     end
 
@@ -90,8 +93,8 @@ if Code.ensure_loaded?(Cachex) do
       true_key = true_key(key)
 
       case Cachex.get(cache, true_key) do
-        {:ok, {:stored, value}} ->
-          value
+        {:ok, compressed_value} when is_binary(compressed_value) ->
+          decompress_value(compressed_value)
 
         _ ->
           execute_cache_miss_function(cache, key, func, cache_modify_middleware)
@@ -119,9 +122,9 @@ if Code.ensure_loaded?(Cachex) do
         _ = GenServer.cast(unlocker_pid, {:unlock_after, unlock_fun})
 
         case Cachex.get(cache, true_key(key)) do
-          {:ok, {:stored, value}} ->
+          {:ok, compressed_value} when is_binary(compressed_value) ->
             # First check if the result has not been stored while waiting for the lock.
-            value
+            decompress_value(compressed_value)
 
           _ ->
             handle_execute_cache_miss_function(
@@ -176,20 +179,32 @@ if Code.ensure_loaded?(Cachex) do
           error
 
         {:ok, _value} = ok_tuple ->
-          cache_item(cache, key, {:stored, ok_tuple})
+          cache_item(cache, key, ok_tuple)
           ok_tuple
       end
     end
 
     defp cache_item(cache, {key, ttl}, value) when is_integer(ttl) do
-      Cachex.put(cache, key, value, ttl: :timer.seconds(ttl))
+      Cachex.put(cache, key, compress_value(value), ttl: :timer.seconds(ttl))
     end
 
     defp cache_item(cache, key, value) do
-      Cachex.put(cache, key, value, ttl: :timer.seconds(@default_ttl_seconds))
+      Cachex.put(cache, key, compress_value(value), ttl: :timer.seconds(@default_ttl_seconds))
     end
 
     defp true_key({key, ttl}) when is_integer(ttl), do: key
     defp true_key(key), do: key
+
+    defp compress_value(value) do
+      value
+      |> :erlang.term_to_binary()
+      |> :zlib.gzip()
+    end
+
+    defp decompress_value(value) do
+      value
+      |> :zlib.gunzip()
+      |> :erlang.binary_to_term()
+    end
   end
 end

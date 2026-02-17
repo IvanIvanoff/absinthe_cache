@@ -95,6 +95,10 @@ defmodule AbsintheCache do
     end
   end
 
+  def child_spec(opts) do
+    CacheProvider.child_spec(opts)
+  end
+
   @doc ~s"""
   Clears the whole cache. Slow.
   """
@@ -106,7 +110,14 @@ defmodule AbsintheCache do
   The size of the cache in megabytes
   """
   def size() do
-    CacheProvider.size(@cache_name, :megabytes)
+    CacheProvider.size(@cache_name)
+  end
+
+  @doc ~s"""
+  The number of entries in the cache
+  """
+  def count() do
+    CacheProvider.count(@cache_name)
   end
 
   def get(key) do
@@ -248,7 +259,16 @@ defmodule AbsintheCache do
     end
 
     args = args |> convert_values(ttl)
-    cache_key = [name, args] |> hash()
+
+    # Include the current datetime bucket to relieve some locking issues. If a process
+    # somehow does not release a lock, force the key to change after the base_ttl + max_ttl_offset
+    # time passes by including this rounded datetime to the cache key.
+    # Adding a random value between 0 and 180 based on the query and slug used helps
+    # avoid the thundering herd issue
+    bucket_ttl = base_ttl + max_ttl_offset + :erlang.phash2({name, args}, 180)
+    current_bucket = convert_values(DateTime.utc_now(), bucket_ttl)
+
+    cache_key = {current_bucket, name, args} |> hash()
 
     {cache_key, ttl}
   end
