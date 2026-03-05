@@ -30,6 +30,7 @@ defmodule AbsintheCache.BeforeSend do
       @compile inline: [cache_result: 2, queries_in_request: 1, has_graphql_errors?: 1]
 
       @cached_queries Keyword.get(opts, :cached_queries, [])
+      @cache_config Keyword.fetch!(opts, :cache_config)
       def before_send(conn, %Absinthe.Blueprint{} = blueprint) do
         # Do not cache in case of:
         # -`:nocache` returned from a resolver
@@ -53,8 +54,10 @@ defmodule AbsintheCache.BeforeSend do
 
         if all_queries_cacheable? do
           AbsintheCache.store(
+            AbsintheCache.cache_name(),
             blueprint.execution.context.query_cache_key,
-            blueprint.result
+            blueprint.result,
+            @cache_config
           )
         end
       end
