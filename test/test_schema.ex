@@ -1,5 +1,6 @@
 defmodule Schema do
   use Absinthe.Schema
+  use AbsintheCache, provider: AbsintheCache.ConCacheProvider
   import AbsintheCache, only: [cache_resolve: 1]
 
   query do

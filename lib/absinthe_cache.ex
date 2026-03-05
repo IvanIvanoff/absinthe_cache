@@ -3,33 +3,83 @@ defmodule AbsintheCache do
   Provides the macro `cache_resolve` that replaces the Absinthe's `resolve` and
   caches the result of the resolver for some time instead of calculating it
   every time.
+
+  ## Configuration (Ecto-style: pass provider at use site)
+
+  In your Absinthe schema (or a dedicated config module), add:
+
+      use AbsintheCache   # defaults to ConCacheProvider
+
+  Or use a custom provider (e.g. Valkey/Redis):
+
+      use AbsintheCache, provider: MyApp.GraphQLCache.ValkeyProvider
+
+  The provider is stored on that module (no application environment).
+  Start the provider in your supervision tree with `{AbsintheCache, [provider: ..., provider_opts: ...]}`.
+
+  For top-level calls that have no resolution (e.g. `clear_all`, `size`, `get`),
+  pass the config module: `AbsintheCache.clear_all(MySchema)`.
   """
 
   alias __MODULE__, as: CacheMod
 
   require Logger
 
-  defp cache_provider do
-    Application.get_env(:absinthe_cache, :cache_provider, AbsintheCache.ConCacheProvider)
+  @doc """
+  Use this in your schema (or a module that holds cache config) to set the cache provider.
+
+  ## Options
+
+  - `:provider` (optional) – Module implementing `AbsintheCache.Behaviour`. Defaults to `AbsintheCache.ConCacheProvider`.
+
+  ## Example
+
+      defmodule MyAppWeb.Schema do
+        use Absinthe.Schema
+        use AbsintheCache   # uses ConCacheProvider
+        # or: use AbsintheCache, provider: MyApp.GraphQLCache.ValkeyProvider
+        # ...
+      end
+
+  Then start the provider in your supervision tree and use `AbsintheCache.clear_all(MyAppWeb.Schema)` etc.
+  """
+  defmacro __using__(opts) do
+    provider = Keyword.get(opts, :provider, AbsintheCache.ConCacheProvider)
+
+    quote bind_quoted: [provider: provider] do
+      @absinthe_cache_provider provider
+
+      @doc false
+      def __absinthe_cache_provider__, do: @absinthe_cache_provider
+    end
+  end
+
+  @doc """
+  Returns a child spec for the cache provider (delegates to the provider's `child_spec/1`).
+
+  Use in your supervision tree as `{AbsintheCache, [provider: ..., provider_opts: ...]}`.
+  """
+  def child_spec(opts) do
+    provider = Keyword.fetch!(opts, :provider)
+    provider_opts = Keyword.fetch!(opts, :provider_opts)
+    provider.child_spec(provider_opts)
   end
 
   @ttl 300
   @max_ttl_offset 120
 
-  # TODO: Make it configurable
   @cache_name :graphql_cache
 
   @compile {:inline,
-            wrap: 2,
-            wrap: 3,
+            wrap: 4,
+            wrap: 5,
             from: 2,
             resolver: 3,
-            store: 2,
-            store: 3,
-            get_or_store: 2,
-            get_or_store: 3,
-            cache_modify_middleware: 3,
+            store: 4,
+            get_or_store: 4,
+            cache_modify_middleware: 4,
             cache_key: 2,
+            cache_key: 3,
             convert_values: 2,
             generate_additional_args: 1}
 
@@ -61,7 +111,6 @@ defmodule AbsintheCache do
   In such cases a default/filling value can be passed (0, nil, "No data", etc.)
   and the next query will try to resolve it again
   """
-
   defmacro cache_resolve(captured_mfa_ast, opts \\ []) do
     quote do
       middleware(
@@ -80,45 +129,67 @@ defmodule AbsintheCache do
 
   NOTE: `cached_func` is a function with arity 0. That means if you want to use it
   in your code and you want some arguments you should use it like this:
-    > Cache.wrap(
-    >   fn ->
-    >     fetch_last_price_record(pair)
-    >   end,
-    >   :fetch_price_last_record, %{pair: pair}
-    > ).()
+
+      AbsintheCache.wrap(
+        fn -> fetch_last_price_record(pair) end,
+        :fetch_price_last_record,
+        MySchema,
+        %{pair: pair}
+      ).()
+
+  Pass the config module (the one that does `use AbsintheCache, provider: ...`) as the third argument.
   """
-  def wrap(cached_func, name, args \\ %{}, opts \\ []) do
+  def wrap(cached_func, name, config_module, args \\ %{}, opts \\ []) do
+    provider = config_module.__absinthe_cache_provider__()
+
     fn ->
-      cache_provider().get_or_store(
+      provider.get_or_store(
         @cache_name,
         cache_key(name, args, opts),
         cached_func,
-        &cache_modify_middleware/3
+        fn c, k, r -> cache_modify_middleware(c, k, r, config_module) end
       )
     end
   end
 
   @doc ~s"""
   Clears the whole cache. Slow.
+
+  Pass the config module (the one that does `use AbsintheCache, provider: ...`).
   """
-  def clear_all() do
-    cache_provider().clear_all(@cache_name)
+  def clear_all(config_module) do
+    config_module.__absinthe_cache_provider__().clear_all(@cache_name)
   end
 
   @doc ~s"""
-  The size of the cache in megabytes
+  The size of the cache in megabytes.
+
+  Pass the config module (the one that does `use AbsintheCache, provider: ...`).
   """
-  def size() do
-    cache_provider().size(@cache_name)
+  def size(config_module) do
+    config_module.__absinthe_cache_provider__().size(@cache_name)
   end
 
-  def get(key) do
-    cache_provider().get(@cache_name, key)
+  @doc """
+  Get a value by key. Pass the config module (the one that does `use AbsintheCache, provider: ...`).
+  """
+  def get(config_module, key) do
+    config_module.__absinthe_cache_provider__().get(@cache_name, key)
   end
 
   @doc false
+  def cache_name, do: @cache_name
+
+  @doc """
+  Store a value. Used by BeforeSend; pass the config module.
+  """
+  def store(cache_name, cache_key, value, config_module) do
+    config_module.__absinthe_cache_provider__().store(cache_name, cache_key, value)
+  end
+
+  # Public so it can be used by the resolve macros. You should not use it.
+  @doc false
   def from(captured_mfa, opts) when is_function(captured_mfa) do
-    # Public so it can be used by the resolve macros. You should not use it.
     case Keyword.pop(opts, :fun_name) do
       {nil, opts} ->
         fun_name = captured_mfa |> :erlang.fun_info() |> Keyword.get(:name)
@@ -135,8 +206,9 @@ defmodule AbsintheCache do
     fn
       %{} = root, args, resolution ->
         fun = fn -> resolver_fn.(root, args, resolution) end
+        config_module = resolution.schema
 
-        # by default use only :id from the root
+        # By default use only :id from the root
         root_keys = Keyword.get(opts, :root_keys, [:id])
         additional_args = Map.take(root, root_keys)
 
@@ -145,22 +217,21 @@ defmodule AbsintheCache do
         # {getMetric(metric: "nvt") {timeseriesData(...)}}
         # the key must include `metric` from the parent's args
         args_from_source = generate_additional_args(resolution.source)
-
         cache_key = cache_key({name, additional_args, args_from_source}, args, opts)
 
         # In some edge-cases the caching can be disabled for some reason. In one
         # particular case for all_projects_by_function the caching is disabled
         # (by putting the do_not_cache_query: true Process dictionary key-value)
         # if the base_projects depends on a watchlist. The cache resolver that
-        # is disabled must provide the `honor_do_no_cache_flag: true` explicitly,
-        # so we are not disabling all of the caching, but only the one that matters
+        # is disabled must provide the `honor_do_not_cache_flag: true` explicitly,
+        # so we are not disabling all of the caching, but only the one that matters.
         skip_cache? =
           Keyword.get(opts, :honor_do_not_cache_flag, false) and
             Process.get(:do_not_cache_query) == true
 
         case skip_cache? do
           true -> fun.()
-          false -> get_or_store(cache_key, fun)
+          false -> get_or_store(@cache_name, cache_key, fun, config_module)
         end
     end
   end
@@ -174,36 +245,34 @@ defmodule AbsintheCache do
     end
   end
 
-  def store(cache_name \\ @cache_name, cache_key, value) do
-    cache_provider().store(cache_name, cache_key, value)
-  end
+  def get_or_store(cache_name, cache_key, resolver_fn, config_module) do
+    provider = config_module.__absinthe_cache_provider__()
 
-  def get_or_store(cache_name \\ @cache_name, cache_key, resolver_fn) do
-    cache_provider().get_or_store(
+    provider.get_or_store(
       cache_name,
       cache_key,
       resolver_fn,
-      &cache_modify_middleware/3
+      fn c, k, r -> cache_modify_middleware(c, k, r, config_module) end
     )
   end
 
-  # `cache_modify_middleware` is called only from within `get_or_store` that
+  # `cache_modify_middleware` is called only from within `get_or_store` which
   # guarantees that it will be executed only once if it is accessed concurrently.
-  # This is way it is safe to use `store` explicitly without worrying about race
-  # conditions
-  defp cache_modify_middleware(cache_name, cache_key, {:ok, value} = result) do
-    cache_provider().store(cache_name, cache_key, result)
-
+  # This is why it is safe to use `store` explicitly without worrying about race
+  # conditions.
+  defp cache_modify_middleware(cache_name, cache_key, {:ok, value} = result, config_module) do
+    store(cache_name, cache_key, result, config_module)
     {:ok, value}
   end
 
   defp cache_modify_middleware(
          cache_name,
          cache_key,
-         {:middleware, Absinthe.Middleware.Async = midl, {fun, opts}}
+         {:middleware, Absinthe.Middleware.Async = midl, {fun, opts}},
+         config_module
        ) do
     caching_fun = fn ->
-      cache_provider().get_or_store(cache_name, cache_key, fun, &cache_modify_middleware/3)
+      get_or_store(cache_name, cache_key, fun, config_module)
     end
 
     {:middleware, midl, {caching_fun, opts}}
@@ -212,14 +281,15 @@ defmodule AbsintheCache do
   defp cache_modify_middleware(
          cache_name,
          cache_key,
-         {:middleware, Absinthe.Middleware.Dataloader = midl, {loader, callback}}
+         {:middleware, Absinthe.Middleware.Dataloader = midl, {loader, callback}},
+         config_module
        ) do
     caching_callback = fn loader_arg ->
-      cache_provider().get_or_store(
+      get_or_store(
         cache_name,
         cache_key,
         fn -> callback.(loader_arg) end,
-        &cache_modify_middleware/3
+        config_module
       )
     end
 
@@ -237,12 +307,10 @@ defmodule AbsintheCache do
 
     base_ttl = Enum.max([base_ttl, 1])
     max_ttl_offset = Enum.max([max_ttl_offset, 1])
-
     # Used to randomize the TTL for lists of objects like list of projects
     additional_args = Map.take(args, [:slug, :id])
-
     # Using phash2 as a random number between 0 and max_ttl_offset is needed.
-    # collisions are allowed and do not lead to errors
+    # Collisions are allowed and do not lead to errors.
     ttl = base_ttl + ({name, additional_args} |> :erlang.phash2(max_ttl_offset))
 
     if args[:caching_params] do
@@ -251,24 +319,18 @@ defmodule AbsintheCache do
     end
 
     args = args |> convert_values(ttl)
-    cache_key = [name, args] |> hash()
-
-    {cache_key, ttl}
+    key = [name, args] |> hash()
+    {key, ttl}
   end
 
-  # Convert the values for using in the cache. A special treatment is done for
-  # `%DateTime{}` so all datetimes in a @ttl sized window are treated the same
   defp convert_values(%DateTime{} = v, ttl), do: div(DateTime.to_unix(v, :second), ttl)
   defp convert_values(%_{} = v, _), do: Map.from_struct(v)
 
   defp convert_values(args, ttl) when is_list(args) or is_map(args) do
     args
     |> Enum.map(fn
-      {k, v} ->
-        [k, convert_values(v, ttl)]
-
-      data ->
-        convert_values(data, ttl)
+      {k, v} -> [k, convert_values(v, ttl)]
+      data -> convert_values(data, ttl)
     end)
   end
 

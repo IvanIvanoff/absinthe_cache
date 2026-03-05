@@ -21,7 +21,7 @@ Goals:
 - Easy to start using - just start the cache backend (integrated [cachex](https://github.com/whitfin/cachex) and [con_cache](https://github.com/sasa1977/con_cache)) and replace the `resolve` macro with `cache_resolve`.
 - `cache_resolve` provides out of the box support for resolvers that do not immediately return a result, but are using `async` or `dataloader`.
 - Solves the problem of executing many resolvers for one query <sup> 1 </sup>.
-- Pluggable cache backend. You do not like `con_cache` or want to use `Redis` so the cache is shared between multiple nodes? Just implement a behavior with 5 functions
+- Pluggable cache backend. You do not like `con_cache` or want to use `Redis`/Valkey so the cache is shared between multiple nodes? Pass your provider at use site and implement `AbsintheCache.Behaviour`.
 
 > <sup> 1 </sup> A query that returns a list of 1000 objects with each of them running 3 resolvers, the query will have in total `1 + 1000 * 3 = 3001` resolvers being run. Even if these resolvers are cached, this means that 3001 cache calls have to be made. In order to solve this issue, `AbsintheCache` allows you to plug in the request's processing pipeline, skip the whole resolution phase and inject the final result directly. The final result is the result after all resolvers have run.
 
@@ -35,6 +35,43 @@ The cache implementation has been used at [Santiment](https://santiment.net/) si
 
 - Cache a single resolver by changing the `resolve` macro to `cache_resolve`.
 - Cache the result of the whole query execution at once.
+
+## Pluggable backends
+
+The cache backend is chosen **at use site** (no application environment). In your Absinthe schema—or any module that will be the "config" for the cache—add:
+
+```elixir
+defmodule MyAppWeb.Schema do
+  use Absinthe.Schema
+  use AbsintheCache   # optional: defaults to AbsintheCache.ConCacheProvider (in-memory)
+  # ...
+end
+```
+
+If you omit `provider`, it defaults to `AbsintheCache.ConCacheProvider`. To use a custom backend (e.g. Redis/Valkey for multi-node or ElastiCache):
+
+```elixir
+use AbsintheCache, provider: MyApp.GraphQLCache.ValkeyProvider
+```
+
+Your provider must implement `AbsintheCache.Behaviour` (see `lib/cache_provider.ex`). Start the provider in your supervision tree with `{AbsintheCache, [provider: ..., provider_opts: ...]}` (the library delegates to the provider's `child_spec/1`):
+
+```elixir
+{AbsintheCache,
+ [
+   provider: MyApp.GraphQLCache.ValkeyProvider,
+   provider_opts: [id: :graphql_cache, name: :graphql_cache, redis_url: "...", password: "..."]
+ ]}
+```
+
+Or add your provider's `child_spec/1` directly to your supervisor.
+
+- **Resolver path**: The provider is read from the schema (the module that did `use AbsintheCache, provider: ...`), so `cache_resolve` works without any global config.
+- **Top-level API**: For calls that have no resolution context, pass the config module:  
+  `AbsintheCache.clear_all(MyAppWeb.Schema)`, `AbsintheCache.get(MyAppWeb.Schema, key)`, `AbsintheCache.size(MyAppWeb.Schema)`.
+- **BeforeSend / DocumentProvider**: Pass the same config module so they use the same backend:  
+  `use AbsintheCache.BeforeSend, cached_queries: ["getUsers"], cache_config: MyAppWeb.Schema`  
+  `use AbsintheCache.DocumentProvider, ttl: 3600, cache_config: MyAppWeb.Schema`
 
 ## Examples
 
@@ -62,29 +99,33 @@ Cache the result for 5 minutes.
 
 In order to cache the resolver the following steps must be done:
 
-First, the cache backend needs to be started in the supervision tree:
+First, configure the cache provider in your schema and start it in the supervision tree (if you omit `provider`, ConCacheProvider is used):
 
 ```elixir
-# TODO: Abstract & improve
-Supervisor.child_spec(
-  {ConCache,
-    [
-      name: :graphql_cache,
-      ttl_check_interval: :timer.seconds(30),
-      global_ttl: :timer.minutes(5),
-      acquire_lock_timeout: 30_000
-    ]},
-  id: :api_cache
-)
+# In your schema
+defmodule MyAppWeb.Schema do
+  use Absinthe.Schema
+  use AbsintheCache   # or: use AbsintheCache, provider: AbsintheCache.ConCacheProvider
+  import AbsintheCache, only: [cache_resolve: 1, cache_resolve: 2]
+  # ...
+end
 ```
-
-This is where the cached data is persisted. It's important that the name of the cache is `:graphql_cache` as this is currently hardcoded in the implementation (will be improved)
-
-Then the new resolve macros need to be imported.
 
 ```elixir
-import AbsintheCache, only: [cache_resolve: 1, cache_resolve: 2]
+# In your application's supervision tree
+{AbsintheCache,
+ [
+   provider: AbsintheCache.ConCacheProvider,
+   provider_opts: [
+     id: :graphql_cache,
+     name: :graphql_cache,
+     ttl_check_interval: :timer.seconds(30),
+     global_ttl: :timer.minutes(5)
+   ]
+ ]}
 ```
+
+Then the new resolve macros need to be imported (as in the schema snippet above).
 
 `resolve` can now be replaced with `cache_resolve`:
 
@@ -152,20 +193,24 @@ field :get_users, list_of(:user) do
 end
 ```
 
-The first step is defining which queries are to be cached. This is done in the following way:
+The first step is defining which queries are to be cached. Pass your schema (or the module that does `use AbsintheCache, provider: ...`) as `cache_config`:
 
 ```elixir
 defmodule MyAppWeb.Graphql.AbsintheBeforeSend do
-  use AbsintheCache.BeforeSend, cached_queries: ["get_users"]
+  use AbsintheCache.BeforeSend,
+    cached_queries: ["get_users"],
+    cache_config: MyAppWeb.Schema
 end
 ```
 
-Then you need to decide for how long to cache them:
+Then you need to decide for how long to cache them (and pass the same `cache_config`):
 
 ```elixir
-
 defmodule MyAppWeb.Graphql.DocumentProvider do
-  use AbsintheCache.DocumentProvider, ttl: 300, max_ttl_offset: 120
+  use AbsintheCache.DocumentProvider,
+    ttl: 300,
+    max_ttl_offset: 120,
+    cache_config: MyAppWeb.Schema
 end
 ```
 

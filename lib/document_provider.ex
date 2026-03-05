@@ -35,6 +35,7 @@ defmodule AbsintheCache.DocumentProvider do
   defmacro __using__(opts) do
     quote location: :keep, bind_quoted: [opts: opts] do
       @behaviour Absinthe.Plug.DocumentProvider
+      @cache_config Keyword.fetch!(opts, :cache_config)
 
       @doc false
       @impl true
@@ -42,7 +43,7 @@ defmodule AbsintheCache.DocumentProvider do
         pipeline
         |> Absinthe.Pipeline.insert_before(
           Absinthe.Phase.Document.Execution.Resolution,
-          __MODULE__.CacheDocument
+          {__MODULE__.CacheDocument, [cache_config: @cache_config]}
         )
         |> Absinthe.Pipeline.insert_after(
           Absinthe.Phase.Document.Result,
@@ -88,7 +89,8 @@ defmodule AbsintheCache.DocumentProvider do
         def additional_cache_key_args_fun_default(_), do: :ok
 
         @spec run(Absinthe.Blueprint.t(), Keyword.t()) :: Absinthe.Phase.result_t()
-        def run(bp_root, _) do
+        def run(bp_root, phase_opts) do
+          cache_config = Keyword.fetch!(phase_opts, :cache_config)
           additional_args = @cache_key_fun.(bp_root)
 
           cache_key =
@@ -101,7 +103,7 @@ defmodule AbsintheCache.DocumentProvider do
 
           bp_root = add_cache_key_to_context(bp_root, cache_key)
 
-          case AbsintheCache.get(cache_key) do
+          case AbsintheCache.get(cache_config, cache_key) do
             nil ->
               {:ok, bp_root}
 

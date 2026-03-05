@@ -9,13 +9,9 @@ defmodule AbsintheCache.TestCase do
       import unquote(__MODULE__)
 
       setup do
-        # Start the graphQL in-memory cache
-        {:ok, cache_pid} =
-          ConCache.start_link(name: :graphql_cache, ttl_check_interval: 30, global_ttl: 300)
-
-        # Silently kill the cache before ending the test
-        on_exit(fn -> ExUnit.CaptureLog.capture_log(fn -> Process.exit(cache_pid, :kill) end) end)
-        %{cache_pid: cache_pid}
+        # Cache started once in test_helper; clear between tests (config module = schema)
+        AbsintheCache.clear_all(AbsintheCacheTest.Schema)
+        :ok
       end
     end
   end
