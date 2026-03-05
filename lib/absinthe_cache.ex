@@ -6,9 +6,12 @@ defmodule AbsintheCache do
   """
 
   alias __MODULE__, as: CacheMod
-  alias AbsintheCache.ConCacheProvider, as: CacheProvider
 
   require Logger
+
+  defp cache_provider do
+    Application.get_env(:absinthe_cache, :cache_provider, AbsintheCache.ConCacheProvider)
+  end
 
   @ttl 300
   @max_ttl_offset 120
@@ -86,7 +89,7 @@ defmodule AbsintheCache do
   """
   def wrap(cached_func, name, args \\ %{}, opts \\ []) do
     fn ->
-      CacheProvider.get_or_store(
+      cache_provider().get_or_store(
         @cache_name,
         cache_key(name, args, opts),
         cached_func,
@@ -99,18 +102,18 @@ defmodule AbsintheCache do
   Clears the whole cache. Slow.
   """
   def clear_all() do
-    CacheProvider.clear_all(@cache_name)
+    cache_provider().clear_all(@cache_name)
   end
 
   @doc ~s"""
   The size of the cache in megabytes
   """
   def size() do
-    CacheProvider.size(@cache_name, :megabytes)
+    cache_provider().size(@cache_name)
   end
 
   def get(key) do
-    CacheProvider.get(@cache_name, key)
+    cache_provider().get(@cache_name, key)
   end
 
   @doc false
@@ -172,11 +175,11 @@ defmodule AbsintheCache do
   end
 
   def store(cache_name \\ @cache_name, cache_key, value) do
-    CacheProvider.store(cache_name, cache_key, value)
+    cache_provider().store(cache_name, cache_key, value)
   end
 
   def get_or_store(cache_name \\ @cache_name, cache_key, resolver_fn) do
-    CacheProvider.get_or_store(
+    cache_provider().get_or_store(
       cache_name,
       cache_key,
       resolver_fn,
@@ -189,7 +192,7 @@ defmodule AbsintheCache do
   # This is way it is safe to use `store` explicitly without worrying about race
   # conditions
   defp cache_modify_middleware(cache_name, cache_key, {:ok, value} = result) do
-    CacheProvider.store(cache_name, cache_key, result)
+    cache_provider().store(cache_name, cache_key, result)
 
     {:ok, value}
   end
@@ -200,7 +203,7 @@ defmodule AbsintheCache do
          {:middleware, Absinthe.Middleware.Async = midl, {fun, opts}}
        ) do
     caching_fun = fn ->
-      CacheProvider.get_or_store(cache_name, cache_key, fun, &cache_modify_middleware/3)
+      cache_provider().get_or_store(cache_name, cache_key, fun, &cache_modify_middleware/3)
     end
 
     {:middleware, midl, {caching_fun, opts}}
@@ -212,7 +215,7 @@ defmodule AbsintheCache do
          {:middleware, Absinthe.Middleware.Dataloader = midl, {loader, callback}}
        ) do
     caching_callback = fn loader_arg ->
-      CacheProvider.get_or_store(
+      cache_provider().get_or_store(
         cache_name,
         cache_key,
         fn -> callback.(loader_arg) end,
