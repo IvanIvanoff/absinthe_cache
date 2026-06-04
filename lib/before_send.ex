@@ -3,7 +3,7 @@ defmodule AbsintheCache.BeforeSend do
   Cache & Persist API Call Data right before sending the response.
 
   This module is responsible for persisting the whole result of some queries
-  right before it is send to the client.
+  right before it is sent to the client.
 
   All queries that did not raise exceptions and were successfully handled
   by the GraphQL layer pass through this module.
@@ -26,19 +26,18 @@ defmodule AbsintheCache.BeforeSend do
 
   defmacro __using__(opts) do
     quote location: :keep, bind_quoted: [opts: opts] do
-      @compile :inline_list_funcs
-      @compile inline: [cache_result: 2, queries_in_request: 1, has_graphql_errors?: 1]
-
       @cached_queries Keyword.get(opts, :cached_queries, [])
+      @context_cache_key Keyword.get(opts, :context_cache_key, :query_cache_key)
+
       def before_send(conn, %Absinthe.Blueprint{} = blueprint) do
         # Do not cache in case of:
         # -`:nocache` returned from a resolver
         # - result is taken from the cache and should not be stored again. Storing
         # it again `touch`es it and the TTL timer is restarted. This can lead
-        # to infinite storing the same value if there are enough requests
+        # to infinitely storing the same value if there are enough requests
 
         queries = queries_in_request(blueprint)
-        do_not_cache? = Process.get(:do_not_cache_query) != nil
+        do_not_cache? = Process.get(:__do_not_cache_query__) != nil
 
         case do_not_cache? or has_graphql_errors?(blueprint) do
           true -> :ok
@@ -52,10 +51,40 @@ defmodule AbsintheCache.BeforeSend do
         all_queries_cacheable? = queries |> Enum.all?(&Enum.member?(@cached_queries, &1))
 
         if all_queries_cacheable? do
-          AbsintheCache.store(
-            blueprint.execution.context.query_cache_key,
-            blueprint.result
-          )
+          case get_cache_key(blueprint) do
+            nil -> :ok
+            cache_key -> AbsintheCache.store(cache_key, blueprint.result)
+          end
+        end
+      end
+
+      # The cache_key is the format of `{key, ttl}` or just `key`. Both cache keys
+      # will be stored under the name `key` and in the first case only the ttl is
+      # changed. This also means that if a value is stored as `{key, 300}` it can be
+      # retrieved by using `{key, 10}` as in the case of `get` the ttl is ignored.
+      # This allows us to change the cache_key produced in the DocumentProvider
+      # and store it with a different ttl. The ttl is changed from the graphql cache
+      # in case `caching_params` is provided.
+      defp get_cache_key(blueprint) do
+        case get_in(blueprint, [Access.key(:execution), Access.key(:context)]) do
+          %{} = context ->
+            case Map.get(context, @context_cache_key) do
+              nil ->
+                nil
+
+              query_cache_key ->
+                case Process.get(:__change_absinthe_before_send_caching_ttl__) do
+                  ttl when is_number(ttl) ->
+                    {cache_key, _old_ttl} = query_cache_key
+                    {cache_key, ttl}
+
+                  _ ->
+                    query_cache_key
+                end
+            end
+
+          _ ->
+            nil
         end
       end
 

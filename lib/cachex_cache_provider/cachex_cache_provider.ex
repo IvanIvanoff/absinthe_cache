@@ -1,17 +1,19 @@
 if Code.ensure_loaded?(Cachex) do
   defmodule AbsintheCache.CachexProvider do
+    @moduledoc """
+    Cachex-based implementation of `AbsintheCache.Behaviour`.
+
+    Values are stored gzipped to reduce memory use. This format is not shared with
+    `AbsintheCache.ConCacheProvider` (in-memory); ConCache is typically used for
+    development/single-node, while Cachex is used when persistence or larger
+    caches are needed.
+    """
     @behaviour AbsintheCache.Behaviour
     @default_ttl_seconds 300
 
     @max_lock_acquired_time_ms 60_000
 
     import Cachex.Spec
-
-    @compile inline: [
-               execute_cache_miss_function: 4,
-               handle_execute_cache_miss_function: 4,
-               obtain_lock: 3
-             ]
 
     @impl AbsintheCache.Behaviour
     def start_link(opts) do
@@ -64,8 +66,11 @@ if Code.ensure_loaded?(Cachex) do
     @impl AbsintheCache.Behaviour
     def get(cache, key) do
       case Cachex.get(cache, true_key(key)) do
-        {:ok, {:stored, value}} -> value
-        _ -> nil
+        {:ok, compressed_value} when is_binary(compressed_value) ->
+          decompress_value(compressed_value)
+
+        _ ->
+          nil
       end
     end
 
@@ -76,12 +81,10 @@ if Code.ensure_loaded?(Cachex) do
           :ok
 
         {:nocache, _} ->
-          Process.put(:has_nocache_field, true)
-
           :ok
 
         _ ->
-          cache_item(cache, key, {:stored, value})
+          cache_item(cache, key, value)
       end
     end
 
@@ -90,8 +93,8 @@ if Code.ensure_loaded?(Cachex) do
       true_key = true_key(key)
 
       case Cachex.get(cache, true_key) do
-        {:ok, {:stored, value}} ->
-          value
+        {:ok, compressed_value} when is_binary(compressed_value) ->
+          decompress_value(compressed_value)
 
         _ ->
           execute_cache_miss_function(cache, key, func, cache_modify_middleware)
@@ -102,7 +105,7 @@ if Code.ensure_loaded?(Cachex) do
       # This is the only place where we need to have the transactional get_or_store
       # mechanism. Cachex.fetch! is running in multiple processes, which causes issues
       # when testing. Cachex.transaction has a non-configurable timeout. We actually
-      # can achieve the required behavior by manually getting and realeasing the lock.
+      # can achieve the required behavior by manually getting and releasing the lock.
       # The transactional guarantees are not needed.
       cache_record = Cachex.Services.Overseer.ensure(cache)
 
@@ -119,9 +122,9 @@ if Code.ensure_loaded?(Cachex) do
         _ = GenServer.cast(unlocker_pid, {:unlock_after, unlock_fun})
 
         case Cachex.get(cache, true_key(key)) do
-          {:ok, {:stored, value}} ->
+          {:ok, compressed_value} when is_binary(compressed_value) ->
             # First check if the result has not been stored while waiting for the lock.
-            value
+            decompress_value(compressed_value)
 
           _ ->
             handle_execute_cache_miss_function(
@@ -153,7 +156,7 @@ if Code.ensure_loaded?(Cachex) do
           # backoff fashion - 10, 130, 375, 709, etc. milliseconds
           # The backoff is capped at 2 seconds
           sleep_ms = (:math.pow(attempt * 20, 1.6) + 10) |> trunc()
-          sleep_ms = Enum.min([sleep_ms, 2000])
+          sleep_ms = min(sleep_ms, 2000)
 
           Process.sleep(sleep_ms)
           obtain_lock(cache_record, keys, attempt + 1)
@@ -168,28 +171,44 @@ if Code.ensure_loaded?(Cachex) do
         {:middleware, _, _} = tuple ->
           cache_modify_middleware.(cache, key, tuple)
 
-        {:nocache, value} ->
-          Process.put(:has_nocache_field, true)
+        {:nocache, {:ok, _result} = value} ->
+          Process.put(:__do_not_cache_query__, true)
           value
 
         {:error, _} = error ->
           error
 
         {:ok, _value} = ok_tuple ->
-          cache_item(cache, key, {:stored, ok_tuple})
+          cache_item(cache, key, ok_tuple)
           ok_tuple
       end
     end
 
     defp cache_item(cache, {key, ttl}, value) when is_integer(ttl) do
-      Cachex.put(cache, key, value, ttl: :timer.seconds(ttl))
+      Cachex.put(cache, key, compress_value(value), ttl: :timer.seconds(ttl))
     end
 
     defp cache_item(cache, key, value) do
-      Cachex.put(cache, key, value, ttl: :timer.seconds(@default_ttl_seconds))
+      Cachex.put(cache, key, compress_value(value), ttl: :timer.seconds(@default_ttl_seconds))
     end
 
     defp true_key({key, ttl}) when is_integer(ttl), do: key
     defp true_key(key), do: key
+
+    defp compress_value(value) do
+      value
+      |> :erlang.term_to_binary()
+      |> :zlib.gzip()
+    end
+
+    defp decompress_value(value) do
+      try do
+        value
+        |> :zlib.gunzip()
+        |> :erlang.binary_to_term([:safe])
+      rescue
+        _ -> nil
+      end
+    end
   end
 end

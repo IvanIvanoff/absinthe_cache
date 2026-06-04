@@ -1,11 +1,11 @@
 defmodule AbsintheCache.CachexProvider.Unlocker do
   @moduledoc ~s"""
-  Module that makes sure that locks acquired during get_or_store locking in
-  the Cachex provider.
+  Ensures that locks acquired during get_or_store in the Cachex provider
+  are released even if the owning process terminates.
 
-  When locks are acquired, a process is spawned that unlocks the lock in case
-  something wrong does with the process that obtained it. If the process finishes
-  fast without issues it will kill this process.
+  When a lock is acquired, an Unlocker process is spawned that will release
+  the lock after a timeout if the owning process fails to do so. If the owning
+  process finishes normally it stops this process.
   """
 
   use GenServer
@@ -42,7 +42,4 @@ defmodule AbsintheCache.CachexProvider.Unlocker do
     {:stop, :normal, state}
   end
 
-  def terminate(_reason, _state) do
-    :normal
-  end
 end

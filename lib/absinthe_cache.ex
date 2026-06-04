@@ -1,34 +1,46 @@
 defmodule AbsintheCache do
   @moduledoc ~s"""
-  Provides the macro `cache_resolve` that replaces the Absinthe's `resolve` and
+  Provides the macro `cache_resolve` that replaces Absinthe's `resolve` and
   caches the result of the resolver for some time instead of calculating it
   every time.
+
+  ## Configuration
+
+  All settings are optional and have sensible defaults:
+
+      config :absinthe_cache,
+        cache_name: :graphql_cache,
+        cache_provider: AbsintheCache.ConCacheProvider,
+        ttl: 300,
+        max_ttl_offset: 120
+
+  - `:cache_name` — the registered name of the cache process (default: `:graphql_cache`)
+  - `:cache_provider` — module implementing `AbsintheCache.Behaviour` (default: `AbsintheCache.ConCacheProvider`)
+  - `:ttl` — base time-to-live in seconds for cached entries (default: `300`)
+  - `:max_ttl_offset` — maximum random offset added to TTL to avoid cache stampede (default: `120`)
+
+  ## Process dictionary keys
+
+  This library communicates between modules via the process dictionary:
+
+  - `:__do_not_cache_query__` — when set to `true`, signals that the current query
+    should not be cached. Set by providers when `{:nocache, {:ok, value}}` is returned,
+    and by `DocumentProvider` on cache hits (to avoid re-storing). Read by `cache_resolve`
+    (with `honor_do_not_cache_flag: true`) and `BeforeSend`.
+  - `:__change_absinthe_before_send_caching_ttl__` — when `caching_params` are provided
+    in the query args, this is set to the computed TTL. Read by `BeforeSend` to override
+    the TTL when storing the full query result.
   """
 
   alias __MODULE__, as: CacheMod
-  alias AbsintheCache.ConCacheProvider, as: CacheProvider
 
-  require Logger
+  @default_ttl 300
+  @default_max_ttl_offset 120
 
-  @ttl 300
-  @max_ttl_offset 120
-
-  # TODO: Make it configurable
-  @cache_name :graphql_cache
-
-  @compile {:inline,
-            wrap: 2,
-            wrap: 3,
-            from: 2,
-            resolver: 3,
-            store: 2,
-            store: 3,
-            get_or_store: 2,
-            get_or_store: 3,
-            cache_modify_middleware: 3,
-            cache_key: 2,
-            convert_values: 2,
-            generate_additional_args: 1}
+  defp cache_name, do: Application.get_env(:absinthe_cache, :cache_name, :graphql_cache)
+  defp cache_provider, do: Application.get_env(:absinthe_cache, :cache_provider, AbsintheCache.ConCacheProvider)
+  defp default_ttl, do: Application.get_env(:absinthe_cache, :ttl, @default_ttl)
+  defp default_max_ttl_offset, do: Application.get_env(:absinthe_cache, :max_ttl_offset, @default_max_ttl_offset)
 
   @doc ~s"""
   Macro that's used instead of Absinthe's `resolve`. This resolver can perform
@@ -37,8 +49,8 @@ defmodule AbsintheCache do
   evaluated at all in this case
   2. Evaluate the resolver function and store the value in the cache if it is
   not present there
-  3. Handle the `Absinthe.Middlewar.Async` and `Absinthe.Middleware.Dataloader`
-  middlewares. In order to handle them, the function that executes the actual
+  3. Handle the `Absinthe.Middleware.Async` and `Absinthe.Middleware.Dataloader`
+  middleware. In order to handle them, the function that executes the actual
   evaluation is wrapped in a function that handles the cache interactions
 
   There are 2 options for the passed function:
@@ -56,7 +68,7 @@ defmodule AbsintheCache do
   the value and just returns `{:ok, value}`. This is particularly useful when
   the result can't be constructed but returning an error will crash the whole query.
   In such cases a default/filling value can be passed (0, nil, "No data", etc.)
-  and the next query will try to resolve it again
+  and the next query will try to resolve it again.
   """
 
   defmacro cache_resolve(captured_mfa_ast, opts \\ []) do
@@ -69,9 +81,9 @@ defmodule AbsintheCache do
   end
 
   @doc ~s"""
-  Exposed as sometimes it can be useful to use it outside the macros.
+  Exposed because it can sometimes be useful outside the macros.
 
-  Gets a function, name and arguments and returns a new function that:
+  Takes a function, name, and arguments and returns a new function that:
   1. On execution checks if the value is present in the cache and returns it
   2. If it's not in the cache it gets executed and the value is stored in the cache.
 
@@ -86,8 +98,8 @@ defmodule AbsintheCache do
   """
   def wrap(cached_func, name, args \\ %{}, opts \\ []) do
     fn ->
-      CacheProvider.get_or_store(
-        @cache_name,
+      cache_provider().get_or_store(
+        cache_name(),
         cache_key(name, args, opts),
         cached_func,
         &cache_modify_middleware/3
@@ -95,22 +107,33 @@ defmodule AbsintheCache do
     end
   end
 
-  @doc ~s"""
-  Clears the whole cache. Slow.
-  """
-  def clear_all() do
-    CacheProvider.clear_all(@cache_name)
+  def child_spec(opts) do
+    cache_provider().child_spec(opts)
   end
 
   @doc ~s"""
-  The size of the cache in megabytes
+  Clears the whole cache.
+  """
+  def clear_all() do
+    cache_provider().clear_all(cache_name())
+  end
+
+  @doc ~s"""
+  The size of the cache in megabytes.
   """
   def size() do
-    CacheProvider.size(@cache_name, :megabytes)
+    cache_provider().size(cache_name())
+  end
+
+  @doc ~s"""
+  The number of entries in the cache.
+  """
+  def count() do
+    cache_provider().count(cache_name())
   end
 
   def get(key) do
-    CacheProvider.get(@cache_name, key)
+    cache_provider().get(cache_name(), key)
   end
 
   @doc false
@@ -149,11 +172,11 @@ defmodule AbsintheCache do
         # particular case for all_projects_by_function the caching is disabled
         # (by putting the do_not_cache_query: true Process dictionary key-value)
         # if the base_projects depends on a watchlist. The cache resolver that
-        # is disabled must provide the `honor_do_no_cache_flag: true` explicitly,
+        # is disabled must provide the `honor_do_not_cache_flag: true` explicitly,
         # so we are not disabling all of the caching, but only the one that matters
         skip_cache? =
           Keyword.get(opts, :honor_do_not_cache_flag, false) and
-            Process.get(:do_not_cache_query) == true
+            Process.get(:__do_not_cache_query__) == true
 
         case skip_cache? do
           true -> fun.()
@@ -171,12 +194,16 @@ defmodule AbsintheCache do
     end
   end
 
-  def store(cache_name \\ @cache_name, cache_key, value) do
-    CacheProvider.store(cache_name, cache_key, value)
+  def store(cache_key, value), do: store(cache_name(), cache_key, value)
+
+  def store(cache_name, cache_key, value) do
+    cache_provider().store(cache_name, cache_key, value)
   end
 
-  def get_or_store(cache_name \\ @cache_name, cache_key, resolver_fn) do
-    CacheProvider.get_or_store(
+  def get_or_store(cache_key, resolver_fn), do: get_or_store(cache_name(), cache_key, resolver_fn)
+
+  def get_or_store(cache_name, cache_key, resolver_fn) do
+    cache_provider().get_or_store(
       cache_name,
       cache_key,
       resolver_fn,
@@ -186,10 +213,10 @@ defmodule AbsintheCache do
 
   # `cache_modify_middleware` is called only from within `get_or_store` that
   # guarantees that it will be executed only once if it is accessed concurrently.
-  # This is way it is safe to use `store` explicitly without worrying about race
-  # conditions
+  # This is why it is safe to use `store` explicitly without worrying about race
+  # conditions.
   defp cache_modify_middleware(cache_name, cache_key, {:ok, value} = result) do
-    CacheProvider.store(cache_name, cache_key, result)
+    cache_provider().store(cache_name, cache_key, result)
 
     {:ok, value}
   end
@@ -200,7 +227,7 @@ defmodule AbsintheCache do
          {:middleware, Absinthe.Middleware.Async = midl, {fun, opts}}
        ) do
     caching_fun = fn ->
-      CacheProvider.get_or_store(cache_name, cache_key, fun, &cache_modify_middleware/3)
+      cache_provider().get_or_store(cache_name, cache_key, fun, &cache_modify_middleware/3)
     end
 
     {:middleware, midl, {caching_fun, opts}}
@@ -212,7 +239,7 @@ defmodule AbsintheCache do
          {:middleware, Absinthe.Middleware.Dataloader = midl, {loader, callback}}
        ) do
     caching_callback = fn loader_arg ->
-      CacheProvider.get_or_store(
+      cache_provider().get_or_store(
         cache_name,
         cache_key,
         fn -> callback.(loader_arg) end,
@@ -226,14 +253,14 @@ defmodule AbsintheCache do
   # Helper functions
 
   def cache_key(name, args, opts \\ []) do
-    base_ttl = args[:caching_params][:base_ttl] || Keyword.get(opts, :ttl, @ttl)
+    base_ttl = args[:caching_params][:base_ttl] || Keyword.get(opts, :ttl, default_ttl())
 
     max_ttl_offset =
       args[:caching_params][:max_ttl_offset] ||
-        Keyword.get(opts, :max_ttl_offset, @max_ttl_offset)
+        Keyword.get(opts, :max_ttl_offset, default_max_ttl_offset())
 
-    base_ttl = Enum.max([base_ttl, 1])
-    max_ttl_offset = Enum.max([max_ttl_offset, 1])
+    base_ttl = max(base_ttl, 1)
+    max_ttl_offset = max(max_ttl_offset, 1)
 
     # Used to randomize the TTL for lists of objects like list of projects
     additional_args = Map.take(args, [:slug, :id])
@@ -248,13 +275,25 @@ defmodule AbsintheCache do
     end
 
     args = args |> convert_values(ttl)
-    cache_key = [name, args] |> hash()
+
+    # Bucket-based invalidation: include the current datetime bucket in the key so that
+    # keys rotate over time. This relieves locking issues—if a process fails to release
+    # a lock, the key will change after the bucket TTL (see below) and the lock becomes
+    # irrelevant. Tradeoff: the same query can produce different keys in different
+    # buckets, reducing cache hit rate near bucket boundaries. Bucket duration is
+    # base_ttl + max_ttl_offset + phash2(..., 180), i.e. base_ttl + max_ttl_offset + 0..179
+    # seconds, so buckets change roughly every (base_ttl + max_ttl_offset) seconds with
+    # some jitter to avoid thundering herd.
+    bucket_ttl = base_ttl + max_ttl_offset + :erlang.phash2({name, args}, 180)
+    current_bucket = convert_values(DateTime.utc_now(), bucket_ttl)
+
+    cache_key = {current_bucket, name, args} |> hash()
 
     {cache_key, ttl}
   end
 
   # Convert the values for using in the cache. A special treatment is done for
-  # `%DateTime{}` so all datetimes in a @ttl sized window are treated the same
+  # `%DateTime{}` so all datetimes in a TTL sized window are treated the same
   defp convert_values(%DateTime{} = v, ttl), do: div(DateTime.to_unix(v, :second), ttl)
   defp convert_values(%_{} = v, _), do: Map.from_struct(v)
 

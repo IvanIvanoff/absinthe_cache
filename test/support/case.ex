@@ -1,15 +1,20 @@
 defmodule AbsintheCache.TestCase do
   use ExUnit.CaseTemplate
 
-  defmacro __using__(_) do
+  defmacro __using__(opts) do
+    async = Keyword.get(opts, :async, true)
+
     quote do
-      use ExUnit.Case, async: true
-      use Plug.Test
+      use ExUnit.Case, async: unquote(async)
+      # import (not use) so we control ExUnit.Case and async; Plug.Test/Plug.Conn
+      # provide conn/2, put_req_header/3, etc. needed for HTTP tests.
+      import Plug.Test
+      import Plug.Conn
 
       import unquote(__MODULE__)
 
       setup do
-        # Start the graphQL in-memory cache
+        # Start the GraphQL in-memory cache
         {:ok, cache_pid} =
           ConCache.start_link(name: :graphql_cache, ttl_check_interval: 30, global_ttl: 300)
 

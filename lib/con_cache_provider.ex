@@ -4,14 +4,6 @@ defmodule AbsintheCache.ConCacheProvider do
   """
   @behaviour AbsintheCache.Behaviour
 
-  @compile {:inline,
-            get: 2,
-            store: 3,
-            get_or_store: 4,
-            cache_item: 3,
-            get_or_store_isolated: 5,
-            execute_and_maybe_cache_function: 4}
-
   @max_cache_ttl 7200
 
   @impl AbsintheCache.Behaviour
@@ -37,23 +29,23 @@ defmodule AbsintheCache.ConCacheProvider do
   def size(cache) do
     bytes_size = :ets.info(ConCache.ets(cache), :memory) * :erlang.system_info(:wordsize)
 
-    _megabytes_size = (bytes_size / (1024 * 1024)) |> Float.round(2)
+    (bytes_size / (1024 * 1024)) |> Float.round(2)
   end
 
   @impl AbsintheCache.Behaviour
   def count(cache) do
     cache
     |> ConCache.ets()
-    |> :ets.tab2list()
-    |> length
+    |> :ets.info(:size)
   end
 
   @impl AbsintheCache.Behaviour
   def clear_all(cache) do
     cache
     |> ConCache.ets()
-    |> :ets.tab2list()
-    |> Enum.each(fn {key, _} -> ConCache.delete(cache, key) end)
+    |> :ets.delete_all_objects()
+
+    :ok
   end
 
   @impl AbsintheCache.Behaviour
@@ -71,7 +63,6 @@ defmodule AbsintheCache.ConCacheProvider do
         :ok
 
       {:nocache, _} ->
-        Process.put(:has_nocache_field, true)
         :ok
 
       value ->
@@ -94,10 +85,10 @@ defmodule AbsintheCache.ConCacheProvider do
   end
 
   defp get_or_store_isolated(cache, key, true_key, func, middleware_func) do
-    # This function is to be executed inside ConCache.isolated/3 call.
-    # This isolated call locks the access for that key before doing anything else
-    # Doing this ensures that the case where another process modified the key
-    # before in the time between the previous check and the locking.
+    # This function is executed inside a ConCache.isolated/3 call.
+    # The isolated call acquires a lock for the key before doing anything else.
+    # This handles the case where another process stored a value between the
+    # previous check and obtaining the lock.
     fun = fn ->
       case ConCache.get(cache, true_key) do
         {:stored, value} ->
@@ -129,7 +120,7 @@ defmodule AbsintheCache.ConCacheProvider do
         middleware_func.(cache, key, tuple)
 
       {:nocache, {:ok, _result} = value} ->
-        Process.put(:do_not_cache_query, true)
+        Process.put(:__do_not_cache_query__, true)
         value
 
       {:ok, _value} = ok_tuple ->
@@ -138,10 +129,12 @@ defmodule AbsintheCache.ConCacheProvider do
     end
   end
 
-  defp cache_item(cache, {key, ttl}, value) when is_integer(ttl) and ttl <= @max_cache_ttl do
+  defp cache_item(cache, {key, ttl}, value) when is_integer(ttl) do
+    clamped_ttl = min(ttl, @max_cache_ttl)
+
     ConCache.put(cache, key, %ConCache.Item{
       value: value,
-      ttl: :timer.seconds(ttl)
+      ttl: :timer.seconds(clamped_ttl)
     })
   end
 
@@ -149,6 +142,6 @@ defmodule AbsintheCache.ConCacheProvider do
     ConCache.put(cache, key, value)
   end
 
-  defp true_key({key, ttl}) when is_integer(ttl) and ttl <= @max_cache_ttl, do: key
+  defp true_key({key, ttl}) when is_integer(ttl), do: key
   defp true_key(key), do: key
 end

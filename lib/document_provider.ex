@@ -14,9 +14,9 @@ defmodule AbsintheCache.DocumentProvider do
   and Result phases. Result is the last phase in the pipeline, thus the Idempotent
   phase is inserted after it.
 
-  If the value is not present in the cache, the Absinthe's default `Resolution` and
-  `Result` phases are being executed and the new `DocumentCache` and `Idempotent`
-  phases are no-op.
+  If the value is not present in the cache, Absinthe's default `Resolution` and
+  `Result` phases are executed and the new `CacheDocument` and `Idempotent`
+  phases are no-ops.
 
   Finally, there's a `before_send` hook that adds the result into the cache.
   """
@@ -55,19 +55,17 @@ defmodule AbsintheCache.DocumentProvider do
         are used. They are defined in the module attribute @cache_fields. The only
         values that are converted to something else in the process of construction
         of the cache key are:
-        - DateTime - It is rounded by TTL so all datetiems in a range yield the same
+        - DateTime - It is rounded by TTL so all datetimes in a range yield the same
          cache key
         - Struct - All structs are converted to plain maps
         """
 
         use Absinthe.Phase
 
-        @compile :inline_list_funcs
-        @compile inline: [add_cache_key_to_context: 2, cache_key_from_params: 2]
-
         # Access opts from the surrounding `AbsintheCache.DocumentProvider` module
         @ttl Keyword.get(opts, :ttl, 120)
-        @max_ttl_ffset Keyword.get(opts, :max_ttl_offset, 60)
+        @max_ttl_offset Keyword.get(opts, :max_ttl_offset, 60)
+        @context_cache_key Keyword.get(opts, :context_cache_key, :query_cache_key)
         @cache_key_fun Keyword.get(
                          opts,
                          :additional_cache_key_args_fun,
@@ -85,7 +83,7 @@ defmodule AbsintheCache.DocumentProvider do
               {"bp_root", additional_args} |> :erlang.phash2(),
               sanitize_blueprint(bp_root),
               ttl: @ttl,
-              max_ttl_offset: @max_ttl_ffset
+              max_ttl_offset: @max_ttl_offset
             )
 
           bp_root = add_cache_key_to_context(bp_root, cache_key)
@@ -96,21 +94,20 @@ defmodule AbsintheCache.DocumentProvider do
 
             result ->
               # Storing it again `touch`es it and the TTL timer is restarted.
-              # This can lead to infinite storing the same value
-              Process.put(:do_not_cache_query, true)
+              # This can lead to infinitely storing the same value
+              Process.put(:__do_not_cache_query__, true)
 
               {:jump, %{bp_root | result: result}, AbsintheCache.Phase.Document.Idempotent}
           end
         end
 
-        # TODO: Make this function configurable
         defp add_cache_key_to_context(
                %{execution: %{context: context} = execution} = blueprint,
                cache_key
              ) do
           %{
             blueprint
-            | execution: %{execution | context: Map.put(context, :query_cache_key, cache_key)}
+            | execution: %{execution | context: Map.put(context, @context_cache_key, cache_key)}
           }
         end
 
@@ -144,44 +141,6 @@ defmodule AbsintheCache.DocumentProvider do
         end
 
         defp sanitize_blueprint(data), do: data
-
-        # Extract the query and variables from the params map and genenrate
-        # a cache key using them.
-
-        # The query is fetched as is.
-        # The variables that are valid datetime types (have the `from` or `to` name
-        # and valid value) are converted to Elixir DateTime type prior to being used.
-        # This is done because the datetimes are rounded so all datetimes in a N minute
-        # buckets have the same cache key.
-
-        # The other param types are not cast as they would be used the same way in both
-        # places where the cache key is calculated.
-        defp cache_key_from_params(params, permissions) do
-          query = Map.get(params, "query", "")
-
-          variables =
-            case Map.get(params, "variables") do
-              map when is_map(map) -> map
-              vars when is_binary(vars) and vars != "" -> vars |> Jason.decode!()
-              _ -> %{}
-            end
-            |> Enum.map(fn
-              {key, value} when is_binary(value) ->
-                case DateTime.from_iso8601(value) do
-                  {:ok, datetime, _} -> {key, datetime}
-                  _ -> {key, value}
-                end
-
-              pair ->
-                pair
-            end)
-            |> Map.new()
-
-          AbsintheCache.cache_key({query, permissions}, variables,
-            ttl: @ttl,
-            max_ttl_offset: @max_ttl_ffset
-          )
-        end
       end
     end
   end
