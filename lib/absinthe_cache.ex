@@ -1,6 +1,6 @@
 defmodule AbsintheCache do
   @moduledoc ~s"""
-  Provides the macro `cache_resolve` that replaces the Absinthe's `resolve` and
+  Provides the macro `cache_resolve` that replaces Absinthe's `resolve` and
   caches the result of the resolver for some time instead of calculating it
   every time.
 
@@ -50,7 +50,7 @@ defmodule AbsintheCache do
   2. Evaluate the resolver function and store the value in the cache if it is
   not present there
   3. Handle the `Absinthe.Middleware.Async` and `Absinthe.Middleware.Dataloader`
-  middlewares. In order to handle them, the function that executes the actual
+  middleware. In order to handle them, the function that executes the actual
   evaluation is wrapped in a function that handles the cache interactions
 
   There are 2 options for the passed function:
@@ -68,7 +68,7 @@ defmodule AbsintheCache do
   the value and just returns `{:ok, value}`. This is particularly useful when
   the result can't be constructed but returning an error will crash the whole query.
   In such cases a default/filling value can be passed (0, nil, "No data", etc.)
-  and the next query will try to resolve it again
+  and the next query will try to resolve it again.
   """
 
   defmacro cache_resolve(captured_mfa_ast, opts \\ []) do
@@ -81,9 +81,9 @@ defmodule AbsintheCache do
   end
 
   @doc ~s"""
-  Exposed as sometimes it can be useful to use it outside the macros.
+  Exposed because it can sometimes be useful outside the macros.
 
-  Gets a function, name and arguments and returns a new function that:
+  Takes a function, name, and arguments and returns a new function that:
   1. On execution checks if the value is present in the cache and returns it
   2. If it's not in the cache it gets executed and the value is stored in the cache.
 
@@ -119,14 +119,14 @@ defmodule AbsintheCache do
   end
 
   @doc ~s"""
-  The size of the cache in megabytes
+  The size of the cache in megabytes.
   """
   def size() do
     cache_provider().size(cache_name())
   end
 
   @doc ~s"""
-  The number of entries in the cache
+  The number of entries in the cache.
   """
   def count() do
     cache_provider().count(cache_name())
@@ -213,8 +213,8 @@ defmodule AbsintheCache do
 
   # `cache_modify_middleware` is called only from within `get_or_store` that
   # guarantees that it will be executed only once if it is accessed concurrently.
-  # This is way it is safe to use `store` explicitly without worrying about race
-  # conditions
+  # This is why it is safe to use `store` explicitly without worrying about race
+  # conditions.
   defp cache_modify_middleware(cache_name, cache_key, {:ok, value} = result) do
     cache_provider().store(cache_name, cache_key, result)
 

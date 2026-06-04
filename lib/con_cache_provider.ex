@@ -85,10 +85,10 @@ defmodule AbsintheCache.ConCacheProvider do
   end
 
   defp get_or_store_isolated(cache, key, true_key, func, middleware_func) do
-    # This function is to be executed inside ConCache.isolated/3 call.
-    # This isolated call locks the access for that key before doing anything else
-    # Doing this ensures that the case where another process modified the key
-    # before in the time between the previous check and the locking.
+    # This function is executed inside a ConCache.isolated/3 call.
+    # The isolated call acquires a lock for the key before doing anything else.
+    # This handles the case where another process stored a value between the
+    # previous check and obtaining the lock.
     fun = fn ->
       case ConCache.get(cache, true_key) do
         {:stored, value} ->

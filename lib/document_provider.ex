@@ -14,9 +14,9 @@ defmodule AbsintheCache.DocumentProvider do
   and Result phases. Result is the last phase in the pipeline, thus the Idempotent
   phase is inserted after it.
 
-  If the value is not present in the cache, the Absinthe's default `Resolution` and
-  `Result` phases are being executed and the new `DocumentCache` and `Idempotent`
-  phases are no-op.
+  If the value is not present in the cache, Absinthe's default `Resolution` and
+  `Result` phases are executed and the new `CacheDocument` and `Idempotent`
+  phases are no-ops.
 
   Finally, there's a `before_send` hook that adds the result into the cache.
   """
@@ -94,7 +94,7 @@ defmodule AbsintheCache.DocumentProvider do
 
             result ->
               # Storing it again `touch`es it and the TTL timer is restarted.
-              # This can lead to infinite storing the same value
+              # This can lead to infinitely storing the same value
               Process.put(:__do_not_cache_query__, true)
 
               {:jump, %{bp_root | result: result}, AbsintheCache.Phase.Document.Idempotent}

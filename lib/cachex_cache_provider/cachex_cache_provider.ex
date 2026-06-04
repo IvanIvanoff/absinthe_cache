@@ -105,7 +105,7 @@ if Code.ensure_loaded?(Cachex) do
       # This is the only place where we need to have the transactional get_or_store
       # mechanism. Cachex.fetch! is running in multiple processes, which causes issues
       # when testing. Cachex.transaction has a non-configurable timeout. We actually
-      # can achieve the required behavior by manually getting and realeasing the lock.
+      # can achieve the required behavior by manually getting and releasing the lock.
       # The transactional guarantees are not needed.
       cache_record = Cachex.Services.Overseer.ensure(cache)
 

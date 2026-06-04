@@ -14,7 +14,7 @@ defmodule AbsintheCache.TestCase do
       import unquote(__MODULE__)
 
       setup do
-        # Start the graphQL in-memory cache
+        # Start the GraphQL in-memory cache
         {:ok, cache_pid} =
           ConCache.start_link(name: :graphql_cache, ttl_check_interval: 30, global_ttl: 300)
 

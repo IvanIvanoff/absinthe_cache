@@ -3,7 +3,7 @@ defmodule AbsintheCache.BeforeSend do
   Cache & Persist API Call Data right before sending the response.
 
   This module is responsible for persisting the whole result of some queries
-  right before it is send to the client.
+  right before it is sent to the client.
 
   All queries that did not raise exceptions and were successfully handled
   by the GraphQL layer pass through this module.
@@ -34,7 +34,7 @@ defmodule AbsintheCache.BeforeSend do
         # -`:nocache` returned from a resolver
         # - result is taken from the cache and should not be stored again. Storing
         # it again `touch`es it and the TTL timer is restarted. This can lead
-        # to infinite storing the same value if there are enough requests
+        # to infinitely storing the same value if there are enough requests
 
         queries = queries_in_request(blueprint)
         do_not_cache? = Process.get(:__do_not_cache_query__) != nil
